@@ -10,7 +10,7 @@ def local_css():
     st.markdown("""
     <style>
         .stApp { background-color: #0E1117 !important; }
-        
+     
         /* FUENTES MÁS GRANDES (+3 aprox) */
         h1, h2, h3, h4, h5, h6, .stMarkdown, p, label, span, div { 
             color: #FAFAFA !important; 
@@ -851,7 +851,7 @@ with c_chart:
     st.plotly_chart(fig_c, use_container_width=True)
 
 with c_table:
-    st.subheader("Resumen Numérico")
+    st.subheader("Resumen Escenarios")
     
     # Formateo visual para la tabla
     df_show = df_comp.copy()
@@ -865,3 +865,4 @@ with c_table:
         hide_index=True,
         height=350
     )
+
