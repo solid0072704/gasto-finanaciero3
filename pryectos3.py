@@ -76,13 +76,13 @@ def get_default_config(type_scen):
         "tasa_anual_clp": tasa_clp, 
         "inflacion_anual": inflacion,
 
-        # Deuda Privada
+        # Deuda Privada (Relacionada ahora incluye frecuencia)
         "prestamo_relacionada": {
             "monto": 5000.0, 
-            "tasa_anual": 8.0
+            "tasa_anual": 8.0,
+            "frecuencia_pago": "Al Final" # Default para relacionada
         },
         "lista_kps": [
-            # Se agrega 'frecuencia_pago' por defecto
             {"nombre": "KP 1", "monto": 2000.0, "tasa_anual": 12.0, "plazo": 24, "frecuencia_pago": "Mensual"}
         ],
         
@@ -132,18 +132,23 @@ def calcular_flujo(data):
     saldo_const_clp_nominal = saldo_inicial * pct_clp 
     
     # --- INICIALIZACIÓN DEUDA PRIVADA ---
+    
+    # 1. Relacionada (Ahora con lógica de frecuencia)
     rel_data = data.get("prestamo_relacionada", {"monto": 0, "tasa_anual": 0})
     saldo_relacionada = rel_data["monto"]
     tasa_mensual_rel = (rel_data["tasa_anual"] / 100) / 12
+    frecuencia_rel = rel_data.get("frecuencia_pago", "Al Final")
+    acumulado_trimestre_rel = 0
     
+    # 2. KPs
     kps_activos = []
     for kp in data.get("lista_kps", []):
         kps_activos.append({
             "saldo": kp["monto"],
             "tasa_mensual": (kp["tasa_anual"] / 100) / 12,
             "plazo": kp["plazo"],
-            "frecuencia": kp.get("frecuencia_pago", "Mensual"), # Mensual, Trimestral, Al Final
-            "acumulado_trimestre": 0, # Para lógica trimestral
+            "frecuencia": kp.get("frecuencia_pago", "Mensual"), 
+            "acumulado_trimestre": 0, 
             "interes_acumulado_hist": 0
         })
 
@@ -205,64 +210,63 @@ def calcular_flujo(data):
         int_clp_nom_mes = (saldo_const_clp_nominal + saldo_terr_clp_nominal) * tasa_mensual_clp
         int_banco_mes_en_uf = int_uf_mes + (int_clp_nom_mes / factor_uf)
         
-        # Capitalizamos intereses Banco temporalmente
         saldo_const_uf += int_uf_mes
         saldo_const_clp_nominal += int_clp_nom_mes
         interes_acum_banco_total += int_banco_mes_en_uf
 
         # B. KPs (Con Lógica de Frecuencia)
-        int_kps_generado_mes = 0 # Solo informativo del mes
-        total_interes_kp_exigible_hoy = 0 # Lo que DEBEMOS pagar hoy según contrato
+        int_kps_generado_mes = 0 
+        total_interes_kp_exigible_hoy = 0 
         
         for kp in kps_activos:
             if kp["saldo"] > 0:
-                # 1. Calculamos el interés del mes
                 ik = kp["saldo"] * kp["tasa_mensual"]
                 kp["interes_acumulado_hist"] += ik
                 int_kps_generado_mes += ik
                 
-                # 2. Manejo según Frecuencia
+                # Gestión Frecuencia KP
                 interes_exigible_este_kp = 0
-                
                 if kp["frecuencia"] == "Mensual":
-                    # Se capitaliza para devengar, pero es exigible inmediato
                     kp["saldo"] += ik
                     interes_exigible_este_kp = ik
-                    
                 elif kp["frecuencia"] == "Trimestral":
-                    # Acumulamos en un "bolsillo" temporal sin capitalizar al principal todavía
-                    # O capitalizamos y llevamos la cuenta de cuánto pagar.
-                    # Standard model: Capitalizamos para que genere interés compuesto o simple?
-                    # Asumiremos capitalización mensual standard, pero exigibilidad trimestral.
                     kp["saldo"] += ik
                     kp["acumulado_trimestre"] += ik
-                    
-                    if m % 3 == 0: # Mes de pago (3, 6, 9...)
+                    if m % 3 == 0:
                         interes_exigible_este_kp = kp["acumulado_trimestre"]
-                        kp["acumulado_trimestre"] = 0 # Reset para el prox trimestre
-                    else:
-                        interes_exigible_este_kp = 0
-                        
+                        kp["acumulado_trimestre"] = 0 
                 elif kp["frecuencia"] == "Al Final":
-                    # Solo capitaliza, NUNCA es exigible hasta que se pague el capital total
                     kp["saldo"] += ik
-                    interes_exigible_este_kp = 0
                 
                 total_interes_kp_exigible_hoy += interes_exigible_este_kp
 
         interes_acum_kps += int_kps_generado_mes
         
-        # C. Relacionada
+        # C. Relacionada (Con Lógica de Frecuencia AHORA IMPLEMENTADA)
         int_rel_mes = 0
+        interes_rel_exigible_hoy = 0
+        
         if saldo_relacionada > 0:
             int_rel_mes = saldo_relacionada * tasa_mensual_rel
-            saldo_relacionada += int_rel_mes 
+            
+            # Gestión Frecuencia Relacionada
+            if frecuencia_rel == "Mensual":
+                saldo_relacionada += int_rel_mes
+                interes_rel_exigible_hoy = int_rel_mes
+            elif frecuencia_rel == "Trimestral":
+                saldo_relacionada += int_rel_mes
+                acumulado_trimestre_rel += int_rel_mes
+                if m % 3 == 0:
+                    interes_rel_exigible_hoy = acumulado_trimestre_rel
+                    acumulado_trimestre_rel = 0
+            else: # Al Final
+                saldo_relacionada += int_rel_mes
+                interes_rel_exigible_hoy = 0 # No se cobra hasta el final
+        
         interes_acum_relacionada += int_rel_mes
         
         # 3. FLUJO OPERATIVO
         ingreso_uf = sum([r["Monto"] for r in recuperos if r["Mes"] == m])
-        
-        # Gastos Operativos
         gasto_operativo_mes = v_otros_mensual if (m <= recepcion + 6) else 0 
         total_otros_costos_operativos += gasto_operativo_mes
         
@@ -272,7 +276,6 @@ def calcular_flujo(data):
         # 4. WATERFALL DE PAGOS
         
         # --- A. BANCO ---
-        # Prioridad 1: Intereses Banco del Mes
         real_const_uf = saldo_const_uf + (saldo_const_clp_nominal / factor_uf)
         real_terr_uf = saldo_terr_uf + (saldo_terr_clp_nominal / factor_uf)
         deuda_banco_total = real_const_uf + real_terr_uf
@@ -287,7 +290,6 @@ def calcular_flujo(data):
             pago_banco_interes = min(monto_a_pagar_banco, int_banco_mes_en_uf)
             pago_banco_capital = monto_a_pagar_banco - pago_banco_interes
             
-            # Reducción saldos Banco
             es_rango_terreno = (m >= inicio_pago_t and m <= fin_pago_t)
             p_terr, p_const = 0, 0
             
@@ -315,25 +317,20 @@ def calcular_flujo(data):
             pago_banco_total = monto_a_pagar_banco
             dinero_para_deuda -= pago_banco_total
 
-        # --- B. KPs (Validando Frecuencia) ---
+        # --- B. KPs ---
         pago_kps_total = 0
         pago_kps_interes = 0
-        
         saldo_total_kps_contable = sum(k['saldo'] for k in kps_activos)
         
         if dinero_para_deuda > 0 and saldo_total_kps_contable > 0:
-            # 1. Pagar Intereses EXIGIBLES (Mensual o Trimestral que venció hoy)
+            # 1. Pago Intereses Exigibles
             monto_interes_kp_pagar = min(dinero_para_deuda, total_interes_kp_exigible_hoy)
             
-            # Distribuir pago de intereses
             for kp in kps_activos:
-                # Determinar cuánto de este KP era exigible hoy
                 exigible_kp = 0
-                if kp["frecuencia"] == "Mensual": exigible_kp = (kp["saldo"] * kp["tasa_mensual"]) # aprox al ultimo int
+                if kp["frecuencia"] == "Mensual": exigible_kp = (kp["saldo"] * kp["tasa_mensual"])
                 elif kp["frecuencia"] == "Trimestral" and m % 3 == 0: exigible_kp = kp["acumulado_trimestre"] # aprox
                 
-                # Nota: Para simplificar la distribución exacta en el loop, 
-                # usaremos prorrata sobre el total exigible global si no alcanza la plata.
                 if total_interes_kp_exigible_hoy > 0:
                     peso_int = exigible_kp / total_interes_kp_exigible_hoy
                     pago_i = monto_interes_kp_pagar * peso_int
@@ -342,37 +339,42 @@ def calcular_flujo(data):
             pago_kps_interes = monto_interes_kp_pagar
             dinero_para_deuda -= pago_kps_interes
             
-            # 2. Pagar Capital KPs (Solo si sobra plata despues de intereses exigibles)
-            # Nota: Si el KP es "Al Final", tecnicamente no deberiamos amortizar capital hasta el final, 
-            # pero el cash sweep suele mandar. Asumiremos que si hay plata, se prepaga capital.
+            # 2. Pago Capital KPs
             if dinero_para_deuda > 0:
                 monto_capital_kp = min(dinero_para_deuda, sum(k['saldo'] for k in kps_activos))
                 pago_kps_total = pago_kps_interes + monto_capital_kp
                 
-                # Prorrata Capital
                 saldo_kps_actual = sum(k['saldo'] for k in kps_activos)
                 for kp in kps_activos:
                     if saldo_kps_actual > 0:
                         peso = kp["saldo"] / saldo_kps_actual
                         abono = monto_capital_kp * peso
                         kp["saldo"] -= abono
-                
                 dinero_para_deuda -= monto_capital_kp
             else:
                 pago_kps_total = pago_kps_interes
 
-        # --- C. Relacionada ---
+        # --- C. Relacionada (Con Lógica Exigible) ---
         pago_rel_total = 0
         pago_rel_interes = 0
+        
         if dinero_para_deuda > 0 and saldo_relacionada > 0:
-            monto_a_pagar_rel = min(saldo_relacionada, dinero_para_deuda)
-            pago_rel_interes = min(monto_a_pagar_rel, int_rel_mes)
+            # 1. Pago Intereses Exigibles (Relacionada)
+            monto_interes_rel_pagar = min(dinero_para_deuda, interes_rel_exigible_hoy)
+            saldo_relacionada -= monto_interes_rel_pagar
+            pago_rel_interes = monto_interes_rel_pagar
+            dinero_para_deuda -= pago_rel_interes
             
-            saldo_relacionada -= monto_a_pagar_rel
-            pago_rel_total = monto_a_pagar_rel
-            dinero_para_deuda -= pago_rel_total
+            # 2. Pago Capital Relacionada (Si sobra)
+            if dinero_para_deuda > 0:
+                monto_capital_rel = min(dinero_para_deuda, saldo_relacionada)
+                saldo_relacionada -= monto_capital_rel
+                pago_rel_total = pago_rel_interes + monto_capital_rel
+                dinero_para_deuda -= monto_capital_rel
+            else:
+                pago_rel_total = pago_rel_interes
 
-        # --- RESULTADOS FINALES MES ---
+        # --- RESULTADOS ---
         total_pagado_intereses = pago_banco_interes + pago_kps_interes + pago_rel_interes
         total_pagado_capital = (pago_banco_total + pago_kps_total + pago_rel_total) - total_pagado_intereses
         
@@ -469,6 +471,9 @@ with col_inputs:
                 data["prestamo_relacionada"]["monto"] = cr1.number_input("Monto (UF)", value=data["prestamo_relacionada"]["monto"], key=f"{scen_key}_rel_mnt")
                 data["prestamo_relacionada"]["tasa_anual"] = cr2.number_input("Tasa Anual (%)", value=data["prestamo_relacionada"]["tasa_anual"], step=0.1, key=f"{scen_key}_rel_tas")
                 
+                # Selector de frecuencia para Relacionada
+                data["prestamo_relacionada"]["frecuencia_pago"] = st.selectbox("Pago Interés Relac.", ["Mensual", "Trimestral", "Al Final"], index=["Mensual", "Trimestral", "Al Final"].index(data["prestamo_relacionada"].get("frecuencia_pago", "Al Final")), key=f"{scen_key}_rel_freq")
+
                 st.markdown("---")
                 st.markdown("##### Inversionistas (KPs)")
                 
