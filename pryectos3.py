@@ -31,6 +31,9 @@ def local_css():
         }
         
         div[data-testid="stDataFrame"] { width: 100%; }
+        
+        /* Botones pequeños para el menú */
+        .small-btn { margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -38,6 +41,10 @@ local_css()
 
 # --- 1. GESTIÓN DE ESTADO ---
 SCENARIOS = ["Real", "Optimista", "Pesimista"]
+
+# Inicializar estado de expansión del menú (Por defecto False = Cerrado)
+if 'menu_expanded' not in st.session_state:
+    st.session_state.menu_expanded = False
 
 def get_default_config(type_scen):
     # Valores base
@@ -76,11 +83,11 @@ def get_default_config(type_scen):
         "tasa_anual_clp": tasa_clp, 
         "inflacion_anual": inflacion,
 
-        # Deuda Privada (Relacionada ahora incluye frecuencia)
+        # Deuda Privada
         "prestamo_relacionada": {
             "monto": 5000.0, 
             "tasa_anual": 8.0,
-            "frecuencia_pago": "Al Final" # Default para relacionada
+            "frecuencia_pago": "Al Final"
         },
         "lista_kps": [
             {"nombre": "KP 1", "monto": 2000.0, "tasa_anual": 12.0, "plazo": 24, "frecuencia_pago": "Mensual"}
@@ -132,15 +139,12 @@ def calcular_flujo(data):
     saldo_const_clp_nominal = saldo_inicial * pct_clp 
     
     # --- INICIALIZACIÓN DEUDA PRIVADA ---
-    
-    # 1. Relacionada (Ahora con lógica de frecuencia)
     rel_data = data.get("prestamo_relacionada", {"monto": 0, "tasa_anual": 0})
     saldo_relacionada = rel_data["monto"]
     tasa_mensual_rel = (rel_data["tasa_anual"] / 100) / 12
     frecuencia_rel = rel_data.get("frecuencia_pago", "Al Final")
     acumulado_trimestre_rel = 0
     
-    # 2. KPs
     kps_activos = []
     for kp in data.get("lista_kps", []):
         kps_activos.append({
@@ -242,14 +246,13 @@ def calcular_flujo(data):
 
         interes_acum_kps += int_kps_generado_mes
         
-        # C. Relacionada (Con Lógica de Frecuencia AHORA IMPLEMENTADA)
+        # C. Relacionada (Con Lógica de Frecuencia)
         int_rel_mes = 0
         interes_rel_exigible_hoy = 0
         
         if saldo_relacionada > 0:
             int_rel_mes = saldo_relacionada * tasa_mensual_rel
             
-            # Gestión Frecuencia Relacionada
             if frecuencia_rel == "Mensual":
                 saldo_relacionada += int_rel_mes
                 interes_rel_exigible_hoy = int_rel_mes
@@ -261,7 +264,7 @@ def calcular_flujo(data):
                     acumulado_trimestre_rel = 0
             else: # Al Final
                 saldo_relacionada += int_rel_mes
-                interes_rel_exigible_hoy = 0 # No se cobra hasta el final
+                interes_rel_exigible_hoy = 0
         
         interes_acum_relacionada += int_rel_mes
         
@@ -286,7 +289,6 @@ def calcular_flujo(data):
 
         if dinero_para_deuda > 0 and deuda_banco_total > 0:
             monto_a_pagar_banco = min(deuda_banco_total, dinero_para_deuda)
-            
             pago_banco_interes = min(monto_a_pagar_banco, int_banco_mes_en_uf)
             pago_banco_capital = monto_a_pagar_banco - pago_banco_interes
             
@@ -323,27 +325,22 @@ def calcular_flujo(data):
         saldo_total_kps_contable = sum(k['saldo'] for k in kps_activos)
         
         if dinero_para_deuda > 0 and saldo_total_kps_contable > 0:
-            # 1. Pago Intereses Exigibles
             monto_interes_kp_pagar = min(dinero_para_deuda, total_interes_kp_exigible_hoy)
-            
             for kp in kps_activos:
                 exigible_kp = 0
                 if kp["frecuencia"] == "Mensual": exigible_kp = (kp["saldo"] * kp["tasa_mensual"])
-                elif kp["frecuencia"] == "Trimestral" and m % 3 == 0: exigible_kp = kp["acumulado_trimestre"] # aprox
+                elif kp["frecuencia"] == "Trimestral" and m % 3 == 0: exigible_kp = kp["acumulado_trimestre"]
                 
                 if total_interes_kp_exigible_hoy > 0:
                     peso_int = exigible_kp / total_interes_kp_exigible_hoy
                     pago_i = monto_interes_kp_pagar * peso_int
                     kp["saldo"] -= pago_i
-            
             pago_kps_interes = monto_interes_kp_pagar
             dinero_para_deuda -= pago_kps_interes
             
-            # 2. Pago Capital KPs
             if dinero_para_deuda > 0:
                 monto_capital_kp = min(dinero_para_deuda, sum(k['saldo'] for k in kps_activos))
                 pago_kps_total = pago_kps_interes + monto_capital_kp
-                
                 saldo_kps_actual = sum(k['saldo'] for k in kps_activos)
                 for kp in kps_activos:
                     if saldo_kps_actual > 0:
@@ -354,18 +351,18 @@ def calcular_flujo(data):
             else:
                 pago_kps_total = pago_kps_interes
 
-        # --- C. Relacionada (Con Lógica Exigible) ---
+        # --- C. Relacionada ---
         pago_rel_total = 0
         pago_rel_interes = 0
         
         if dinero_para_deuda > 0 and saldo_relacionada > 0:
-            # 1. Pago Intereses Exigibles (Relacionada)
+            # 1. Pago Intereses Exigibles
             monto_interes_rel_pagar = min(dinero_para_deuda, interes_rel_exigible_hoy)
             saldo_relacionada -= monto_interes_rel_pagar
             pago_rel_interes = monto_interes_rel_pagar
             dinero_para_deuda -= pago_rel_interes
             
-            # 2. Pago Capital Relacionada (Si sobra)
+            # 2. Pago Capital Relacionada
             if dinero_para_deuda > 0:
                 monto_capital_rel = min(dinero_para_deuda, saldo_relacionada)
                 saldo_relacionada -= monto_capital_rel
@@ -434,12 +431,27 @@ col_inputs, col_dash = st.columns([1.3, 2.7], gap="medium")
 
 with col_inputs:
     st.markdown("### Configuración")
+    
+    # --- LOGICA BOTONES EXPANDIR/CERRAR TODO ---
+    col_btn1, col_btn2 = st.columns(2)
+    if col_btn1.button("🔽 Expandir Todo", key="btn_expand", use_container_width=True):
+        st.session_state.menu_expanded = True
+        st.rerun()
+    if col_btn2.button("🔼 Colapsar Todo", key="btn_collapse", use_container_width=True):
+        st.session_state.menu_expanded = False
+        st.rerun()
+    # ---------------------------------------------
+    
     tabs = st.tabs(["🟦 Real", "🟩 Optimista", "🟥 Pesimista"])
     
     def render_scenario_inputs(scen_key):
         data = st.session_state.data_scenarios[scen_key]
+        
+        # Obtenemos el estado actual de expansión
+        is_expanded = st.session_state.menu_expanded
+        
         with st.container():
-            with st.expander("🏗️ Proyecto Base & Costos", expanded=False):
+            with st.expander("🏗️ Proyecto Base & Costos", expanded=is_expanded):
                 data["valor_terreno"] = st.number_input("Valor Terreno (UF)", value=data["valor_terreno"], key=f"{scen_key}_vt")
                 data["pct_fin_terreno"] = st.slider("% Fin. Terreno", 0, 100, data["pct_fin_terreno"], key=f"{scen_key}_fin_t")
                 data["valor_contrato"] = st.number_input("Costo Const. (UF)", value=data["valor_contrato"], key=f"{scen_key}_vc")
@@ -452,7 +464,7 @@ with col_inputs:
                 data["total_otros_costos_inicial"] = st.number_input("Otros Costos Iniciales (Permisos, Arq)", value=data.get("total_otros_costos_inicial", 0.0), key=f"{scen_key}_oci")
                 data["otros_costos_mensuales"] = st.number_input("Gasto Operativo Mensual (Admin, Ventas)", value=data.get("otros_costos_mensuales", 0.0), key=f"{scen_key}_ocm")
 
-            with st.expander("🏦 Deuda Bancaria", expanded=False):
+            with st.expander("🏦 Deuda Bancaria", expanded=is_expanded):
                 data["pct_deuda_pesos"] = st.slider("% Deuda CLP", 0, 100, data["pct_deuda_pesos"], key=f"{scen_key}_mix")
                 
                 c1, c2, c3 = st.columns(3)
@@ -465,13 +477,11 @@ with col_inputs:
                 data["rango_pago_terreno"] = st.slider("Ventana Pago", 1, 60, (rango_val[0], rango_val[1]), key=f"{scen_key}_rng")
                 data["prioridad_terreno"] = st.checkbox("Prioridad Terreno", value=data.get("prioridad_terreno", False), key=f"{scen_key}_prio")
 
-            with st.expander("🤝 Deuda Privada (KPs y Relac.)", expanded=True):
+            with st.expander("🤝 Deuda Privada (KPs y Relac.)", expanded=is_expanded):
                 st.markdown("##### Préstamo Relacionada")
                 cr1, cr2 = st.columns(2)
                 data["prestamo_relacionada"]["monto"] = cr1.number_input("Monto (UF)", value=data["prestamo_relacionada"]["monto"], key=f"{scen_key}_rel_mnt")
                 data["prestamo_relacionada"]["tasa_anual"] = cr2.number_input("Tasa Anual (%)", value=data["prestamo_relacionada"]["tasa_anual"], step=0.1, key=f"{scen_key}_rel_tas")
-                
-                # Selector de frecuencia para Relacionada
                 data["prestamo_relacionada"]["frecuencia_pago"] = st.selectbox("Pago Interés Relac.", ["Mensual", "Trimestral", "Al Final"], index=["Mensual", "Trimestral", "Al Final"].index(data["prestamo_relacionada"].get("frecuencia_pago", "Al Final")), key=f"{scen_key}_rel_freq")
 
                 st.markdown("---")
@@ -501,7 +511,7 @@ with col_inputs:
                         data["lista_kps"].pop(i)
                     st.rerun()
 
-            with st.expander("💰 Plan de Ventas", expanded=False):
+            with st.expander("💰 Plan de Ventas", expanded=is_expanded):
                 data["valor_venta_total"] = st.number_input("Venta Total (UF)", value=data["valor_venta_total"], key=f"{scen_key}_vvt")
                 lista_ventas = data["plan_ventas"]
                 total_pct = sum([item["pct"] for item in lista_ventas])
