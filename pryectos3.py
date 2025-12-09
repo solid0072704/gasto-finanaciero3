@@ -639,7 +639,7 @@ with col_dash:
     st.markdown("#### 💳 Costos Financieros (Total Devengado)")
     with st.container():
         st.markdown('<div class="interest-card">', unsafe_allow_html=True)
-        st.markdown('<div class="interest-title">Desglose de Intereses Proyectados (Devengado)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="interest-title">Desglose de Intereses Proyectados</div>', unsafe_allow_html=True)
         
         det = res["detalles_fin"]
         ic1, ic2, ic3, ic4 = st.columns(4)
@@ -706,7 +706,7 @@ with col_dash:
 
     # --- NUEVA SECCIÓN: ANÁLISIS POR HITOS (ESCENARIO REAL) ---
     st.markdown("---")
-    st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos (Escenario Real - DEVENGADO)")
+    st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos")
     
     # Obtener parámetros del escenario Real
     params_real = st.session_state.data_scenarios["Real"]
@@ -826,7 +826,7 @@ with col_dash:
         st.plotly_chart(fig_c, use_container_width=True)
 
     with c_table:
-        st.subheader("Resumen Numérico")
+        st.subheader("Resumen Escenarios")
         
         # Formateo visual para la tabla
         df_show = df_comp.copy()
@@ -861,3 +861,4 @@ with col_dash:
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
+
