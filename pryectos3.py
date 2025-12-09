@@ -620,19 +620,28 @@ with col_dash:
         # 3. Concatenar
         df_final = pd.concat([df_display, pd.DataFrame([total_row])], ignore_index=True)
 
-        # 4. Mostrar
+        # 4. Formatear explícitamente con puntos (Convertimos a string)
+        cols_nums = ["Ingresos", "Otros Costos (Op)", "Pago Intereses", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
+        
+        # Función lambda que formatea: 1,000 -> 1.000
+        for col in cols_nums:
+            df_final[col] = df_final[col].apply(lambda x: f"{x:,.0f} UF".replace(",", ".") if pd.notnull(x) else "0 UF")
+
+        # 5. Mostrar
         st.dataframe(
             df_final, 
             use_container_width=True, 
             height=400,
             column_config={
                 "Mes": st.column_config.TextColumn("Mes"),
-                "Ingresos": st.column_config.NumberColumn("Ingresos", format="%.0f UF"),
-                "Otros Costos (Op)": st.column_config.NumberColumn("Otros Costos", format="%.0f UF"),
-                "Pago Intereses": st.column_config.NumberColumn("Intereses", format="%.0f UF"),
-                "Pago Capital": st.column_config.NumberColumn("Capital", format="%.0f UF"),
-                "Flujo Neto": st.column_config.NumberColumn("Flujo Neto", format="%.0f UF"),
-                "Flujo Acumulado": st.column_config.NumberColumn("Acumulado", format="%.0f UF"),
-                "Deuda Total": st.column_config.NumberColumn("Deuda Viva", format="%.0f UF"),
+                # Las columnas ya son texto formateado, no aplicamos NumberColumn para no sobreescribir el formato
+                "Ingresos": st.column_config.TextColumn("Ingresos"),
+                "Otros Costos (Op)": st.column_config.TextColumn("Otros Costos"),
+                "Pago Intereses": st.column_config.TextColumn("Intereses"),
+                "Pago Capital": st.column_config.TextColumn("Capital"),
+                "Flujo Neto": st.column_config.TextColumn("Flujo Neto"),
+                "Flujo Acumulado": st.column_config.TextColumn("Acumulado"),
+                "Deuda Total": st.column_config.TextColumn("Deuda Viva"),
             }
         )
+
