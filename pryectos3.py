@@ -5,17 +5,17 @@ import plotly.graph_objects as go
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Evaluación Inmobiliaria Pro", layout="wide", page_icon="🏢")
 
-# --- ESTILOS CSS (FUENTES AUMENTADAS) ---
+# --- ESTILOS CSS ---
 def local_css():
     st.markdown("""
     <style>
         .stApp { background-color: #0E1117 !important; }
         
-        /* FUENTES MÁS GRANDES GLOBALMENTE (+3 aprox) */
+        /* FUENTES MÁS GRANDES (+3 aprox) */
         h1, h2, h3, h4, h5, h6, .stMarkdown, p, label, span, div { 
             color: #FAFAFA !important; 
             font-family: 'Segoe UI', sans-serif;
-            font-size: 18px !important; /* Aumentado de 16px a 18px/19px */
+            font-size: 18px !important; /* Aumentado */
         }
         
         /* Aumentar tamaño inputs */
@@ -45,12 +45,11 @@ def local_css():
             margin-bottom: 15px;
         }
         
-        /* Aumentar fuente de Tablas */
         div[data-testid="stDataFrame"] { width: 100%; font-size: 18px !important; }
         
         /* Aumentar tamaño de los KPIs (Metrics) */
         div[data-testid="stMetricValue"] {
-            font-size: 34px !important; 
+            font-size: 34px !important; /* + grande */
         }
         div[data-testid="stMetricLabel"] {
             font-size: 18px !important;
@@ -70,7 +69,7 @@ if 'menu_expanded' not in st.session_state:
     st.session_state.menu_expanded = False
 
 def get_default_config(type_scen):
-    # Valores base según escenario
+    # Valores base
     if type_scen == "Optimista":
         venta, tasa_uf, constr = 155000, 5.5, 68000
         inflacion, tasa_clp = 3.0, 9.0
@@ -423,7 +422,6 @@ def calcular_flujo(data):
             "Otros Costos (Op)": gasto_operativo_mes,
             "Inversión (Equity)": egreso_equity_const,
             
-            # Columnas nuevas (Desglose)
             "Int. Banco": pago_banco_interes,
             "Int. KPs": pago_kps_interes,
             "Int. Relac.": pago_rel_interes,
@@ -579,7 +577,11 @@ with col_inputs:
     with tabs[2]: render_scenario_inputs("Pesimista")
 
 # --- DASHBOARD ---
+# LEEMOS DESDE session_state EN LUGAR DE CALCULAR DIRECTAMENTE
 res = st.session_state.calc_results["Real"]
+
+# Función lambda para formatear miles con punto
+fmt_nums = lambda x: f"{x:,.0f}".replace(",", ".")
 
 with col_dash:
     
@@ -637,21 +639,24 @@ with col_dash:
     st.plotly_chart(fig_cash, use_container_width=True)
 
     with st.expander("📋 Tabla Detallada (Verificación de Pagos)", expanded=False):
-        # 1. Columnas nuevas
+        # 1. Definimos las columnas nuevas (desglosadas)
         cols_show = ["Mes", "Ingresos", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
         
-        # 2. Copia
+        # 2. Crear copia para visualización
         df_display = df[cols_show].copy()
         df_display["Mes"] = df_display["Mes"].astype(str)
 
-        # 3. Fila TOTAL
+        # 3. Calcular fila de TOTAL
         total_row = {
             "Mes": "TOTAL",
             "Ingresos": df_display["Ingresos"].sum(),
             "Otros Costos (Op)": df_display["Otros Costos (Op)"].sum(),
+            
+            # Sumamos las columnas desglosadas
             "Int. Banco": df_display["Int. Banco"].sum(),
             "Int. KPs": df_display["Int. KPs"].sum(),
             "Int. Relac.": df_display["Int. Relac."].sum(),
+            
             "Pago Capital": df_display["Pago Capital"].sum(),
             "Flujo Neto": df_display["Flujo Neto"].sum(),
             "Flujo Acumulado": df_display["Flujo Neto"].sum(), 
@@ -661,12 +666,13 @@ with col_dash:
         # 4. Concatenar
         df_final = pd.concat([df_display, pd.DataFrame([total_row])], ignore_index=True)
 
-        # 5. Formatear
+        # 5. Formatear explícitamente con puntos
         cols_nums = ["Ingresos", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
+        
         for col in cols_nums:
             df_final[col] = df_final[col].apply(lambda x: f"{x:,.0f} UF".replace(",", ".") if pd.notnull(x) else "0 UF")
 
-        # 6. Mostrar
+        # 6. Mostrar con Configuración de Columnas
         st.dataframe(
             df_final, 
             use_container_width=True, 
@@ -685,13 +691,66 @@ with col_dash:
             }
         )
 
+    # --- NUEVA SECCIÓN: ANÁLISIS POR HITOS (ESCENARIO REAL) ---
+    st.markdown("---")
+    st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos (Escenario Real)")
+    
+    # Obtener parámetros del escenario Real
+    params_real = st.session_state.data_scenarios["Real"]
+    mes_construccion = int(params_real["duracion_obra"])
+    mes_recepcion = int(params_real["mes_recepcion"])
+    
+    # Encontrar el último mes con ventas (ingresos > 0)
+    # Buscamos en el DataFrame original 'df' el último índice donde 'Ingresos' > 0
+    df_real = res["df"]
+    try:
+        mes_ultimo_recupero = df_real[df_real["Ingresos"] > 0].iloc[-1]["Mes"]
+    except IndexError:
+        mes_ultimo_recupero = mes_recepcion # Fallback por si no hay ventas
+        
+    mes_ultimo_recupero = int(mes_ultimo_recupero)
+    
+    milestones = [
+        {"nombre": "Término Construcción", "mes": mes_construccion},
+        {"nombre": "Recepción Final", "mes": mes_recepcion},
+        {"nombre": "Último Recupero (Fin Ventas)", "mes": mes_ultimo_recupero}
+    ]
+    
+    milestone_data = []
+    total_costo_fin = res["costo_financiero_total"]
+    
+    for ms in milestones:
+        # Filtramos hasta el mes del hito (acumulado)
+        df_cut = df_real[df_real["Mes"] <= ms["mes"]]
+        
+        acum_banco = df_cut["Int. Banco"].sum()
+        acum_kps = df_cut["Int. KPs"].sum()
+        acum_relac = df_cut["Int. Relac"].sum()
+        total_acum = acum_banco + acum_kps + acum_relac
+        
+        pct_avance = (total_acum / total_costo_fin * 100) if total_costo_fin > 0 else 0
+        
+        milestone_data.append({
+            "Hito": f"{ms['nombre']} (Mes {ms['mes']})",
+            "Acum. Banco": fmt_nums(acum_banco),
+            "Acum. KPs": fmt_nums(acum_kps),
+            "Acum. Relac.": fmt_nums(acum_relac),
+            "Total Acumulado": fmt_nums(total_acum),
+            "% del Total Fin.": f"{pct_avance:.1f}%"
+        })
+        
+    df_milestones = pd.DataFrame(milestone_data)
+    st.dataframe(df_milestones, use_container_width=True, hide_index=True)
+
+
 # --- SECCIÓN COMPARATIVA (AL FINAL) ---
 st.markdown("---")
 st.header("⚖️ Comparativa de Escenarios")
 
-# 1. Preparar Datos
+# 1. Preparar Datos para Comparar
 comp_data = []
 for sc in SCENARIOS:
+    # Check if result exists
     if sc in st.session_state.calc_results:
         r = st.session_state.calc_results[sc]
         comp_data.append({
@@ -705,9 +764,6 @@ for sc in SCENARIOS:
 
 df_comp = pd.DataFrame(comp_data)
 
-# Función para formatear miles
-fmt_nums = lambda x: f"{x:,.0f}".replace(",", ".")
-
 # 2. Layout Visual
 c_chart, c_table = st.columns([1.5, 1])
 
@@ -717,30 +773,56 @@ with c_chart:
     
     # Barra Banco
     fig_c.add_trace(go.Bar(
-        name='Banco', x=df_comp['Escenario'], y=df_comp['Int. Banco (UF)'], 
-        marker_color='#3B82F6', text=df_comp['Int. Banco (UF)'].apply(fmt_nums), textposition='auto'
+        name='Banco', 
+        x=df_comp['Escenario'], 
+        y=df_comp['Int. Banco (UF)'], 
+        marker_color='#3B82F6',
+        text=df_comp['Int. Banco (UF)'].apply(fmt_nums), # <--- Texto con el valor
+        textposition='auto' # <--- Posición automática
     ))
     
     # Barra KPs
     fig_c.add_trace(go.Bar(
-        name='KPs', x=df_comp['Escenario'], y=df_comp['Int. KPs (UF)'], 
-        marker_color='#A855F7', text=df_comp['Int. KPs (UF)'].apply(fmt_nums), textposition='auto'
+        name='KPs', 
+        x=df_comp['Escenario'], 
+        y=df_comp['Int. KPs (UF)'], 
+        marker_color='#A855F7',
+        text=df_comp['Int. KPs (UF)'].apply(fmt_nums), # <--- Texto con el valor
+        textposition='auto'
     ))
     
     # Barra Relacionada
     fig_c.add_trace(go.Bar(
-        name='Relacionada', x=df_comp['Escenario'], y=df_comp['Int. Relac. (UF)'], 
-        marker_color='#F97316', text=df_comp['Int. Relac. (UF)'].apply(fmt_nums), textposition='auto'
+        name='Relacionada', 
+        x=df_comp['Escenario'], 
+        y=df_comp['Int. Relac. (UF)'], 
+        marker_color='#F97316',
+        text=df_comp['Int. Relac. (UF)'].apply(fmt_nums), # <--- Texto con el valor
+        textposition='auto'
     ))
     
-    fig_c.update_layout(barmode='group', template="plotly_dark", height=350, legend_title="Tipo Interés", font=dict(size=15))
+    fig_c.update_layout(
+        barmode='group', 
+        template="plotly_dark", 
+        height=350, 
+        legend_title="Tipo Interés", 
+        font=dict(size=15) # Mantenemos la fuente grande
+    )
     st.plotly_chart(fig_c, use_container_width=True)
 
 with c_table:
     st.subheader("Resumen Numérico")
+    
+    # Formateo visual para la tabla
     df_show = df_comp.copy()
     cols_num = ["Int. Banco (UF)", "Int. KPs (UF)", "Int. Relac. (UF)", "Total Intereses (UF)"]
     for col in cols_num:
         df_show[col] = df_show[col].apply(fmt_nums)
     
-    st.dataframe(df_show, use_container_width=True, hide_index=True, height=350)
+    st.dataframe(
+        df_show, 
+        use_container_width=True, 
+        hide_index=True,
+        height=350
+    )
+
