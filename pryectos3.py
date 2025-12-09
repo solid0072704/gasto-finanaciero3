@@ -77,9 +77,9 @@ def get_default_config(type_scen):
         
         # Deuda Bancaria
         "rango_pago_terreno": [1, 60], 
-        "prioridad_terreno": False,    
+        "prioridad_terreno": False,     
         "tasa_anual_uf": tasa_uf,
-        "pct_deuda_pesos": 0,    
+        "pct_deuda_pesos": 0,     
         "tasa_anual_clp": tasa_clp, 
         "inflacion_anual": inflacion,
 
@@ -552,7 +552,7 @@ with col_dash:
     k3.metric("Mes flujo positivo", f"Mes {res['break_even']}" if res['break_even'] else "N/A")
     k4.metric("Peak Deuda", f"{res['peak_deuda']:,.0f} UF")
 
-    # --- NUEVA TARJETA DE INTERESES ---
+    # --- TARJETA DE INTERESES ---
     st.markdown("#### 💳 Costos Financieros (Acumulado)")
     with st.container():
         st.markdown('<div class="interest-card">', unsafe_allow_html=True)
@@ -600,4 +600,39 @@ with col_dash:
 
     with st.expander("📋 Tabla Detallada (Verificación de Pagos)", expanded=False):
         cols_show = ["Mes", "Ingresos", "Otros Costos (Op)", "Pago Intereses", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
-        st.dataframe(df[cols_show], use_container_width=True, height=400)
+        
+        # 1. Crear copia para visualización
+        df_display = df[cols_show].copy()
+        df_display["Mes"] = df_display["Mes"].astype(str)
+
+        # 2. Calcular fila de TOTAL
+        total_row = {
+            "Mes": "TOTAL",
+            "Ingresos": df_display["Ingresos"].sum(),
+            "Otros Costos (Op)": df_display["Otros Costos (Op)"].sum(),
+            "Pago Intereses": df_display["Pago Intereses"].sum(),
+            "Pago Capital": df_display["Pago Capital"].sum(),
+            "Flujo Neto": df_display["Flujo Neto"].sum(),
+            "Flujo Acumulado": df_display["Flujo Neto"].sum(), # El acumulado final es la suma de netos
+            "Deuda Total": 0.0 # No tiene sentido sumar deuda stock
+        }
+
+        # 3. Concatenar
+        df_final = pd.concat([df_display, pd.DataFrame([total_row])], ignore_index=True)
+
+        # 4. Mostrar
+        st.dataframe(
+            df_final, 
+            use_container_width=True, 
+            height=400,
+            column_config={
+                "Mes": st.column_config.TextColumn("Mes"),
+                "Ingresos": st.column_config.NumberColumn("Ingresos", format="%.0f UF"),
+                "Otros Costos (Op)": st.column_config.NumberColumn("Otros Costos", format="%.0f UF"),
+                "Pago Intereses": st.column_config.NumberColumn("Intereses", format="%.0f UF"),
+                "Pago Capital": st.column_config.NumberColumn("Capital", format="%.0f UF"),
+                "Flujo Neto": st.column_config.NumberColumn("Flujo Neto", format="%.0f UF"),
+                "Flujo Acumulado": st.column_config.NumberColumn("Acumulado", format="%.0f UF"),
+                "Deuda Total": st.column_config.NumberColumn("Deuda Viva", format="%.0f UF"),
+            }
+        )
