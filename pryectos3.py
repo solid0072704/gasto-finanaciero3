@@ -15,10 +15,9 @@ def local_css():
         h1, h2, h3, h4, h5, h6, .stMarkdown, p, label, span, div { 
             color: #FAFAFA !important; 
             font-family: 'Segoe UI', sans-serif;
-            font-size: 18px !important; /* Aumentado */
+            font-size: 18px !important; 
         }
         
-        /* Aumentar tamaño inputs */
         div[data-baseweb="input"] { 
             background-color: #262730 !important; 
             color: white !important; 
@@ -28,7 +27,6 @@ def local_css():
         
         div.stVerticalBlock, div[data-testid="stExpander"] { background-color: #1F2937; border-radius: 12px; border: 1px solid #374151; }
         
-        /* Tarjeta de intereses */
         .interest-card {
             background-color: #1F2937;
             padding: 20px;
@@ -39,7 +37,7 @@ def local_css():
         }
         .interest-title {
             color: #9CA3AF;
-            font-size: 1.1em !important; /* Más grande */
+            font-size: 1.1em !important; 
             text-transform: uppercase;
             letter-spacing: 0.05em;
             margin-bottom: 15px;
@@ -47,15 +45,9 @@ def local_css():
         
         div[data-testid="stDataFrame"] { width: 100%; font-size: 18px !important; }
         
-        /* Aumentar tamaño de los KPIs (Metrics) */
-        div[data-testid="stMetricValue"] {
-            font-size: 34px !important; /* + grande */
-        }
-        div[data-testid="stMetricLabel"] {
-            font-size: 18px !important;
-        }
+        div[data-testid="stMetricValue"] { font-size: 34px !important; }
+        div[data-testid="stMetricLabel"] { font-size: 18px !important; }
 
-        /* Botones pequeños para el menú */
         .small-btn { margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
@@ -110,10 +102,11 @@ def get_default_config(type_scen):
         "prestamo_relacionada": {
             "monto": 5000.0, 
             "tasa_anual": 8.0,
-            "frecuencia_pago": "Al Final"
+            "frecuencia_pago": "Al Final",
+            "mes_inicio": 1 # NUEVO CAMPO DEFAULT
         },
         "lista_kps": [
-            {"nombre": "KP 1", "monto": 2000.0, "tasa_anual": 12.0, "plazo": 24, "frecuencia_pago": "Mensual"}
+            {"nombre": "KP 1", "monto": 2000.0, "tasa_anual": 12.0, "plazo": 24, "frecuencia_pago": "Mensual", "mes_inicio": 1} # NUEVO CAMPO DEFAULT
         ],
         
         "valor_venta_total": venta,
@@ -162,17 +155,29 @@ def calcular_flujo(data):
     saldo_const_uf = saldo_inicial * pct_uf
     saldo_const_clp_nominal = saldo_inicial * pct_clp 
     
-    # --- INICIALIZACIÓN DEUDA PRIVADA ---
-    rel_data = data.get("prestamo_relacionada", {"monto": 0, "tasa_anual": 0})
-    saldo_relacionada = rel_data["monto"]
+    # --- INICIALIZACIÓN DEUDA PRIVADA (RELACIONADA) ---
+    rel_data = data.get("prestamo_relacionada", {"monto": 0, "tasa_anual": 0, "mes_inicio": 1})
+    monto_total_relacionada = rel_data["monto"]
+    mes_inicio_rel = int(rel_data.get("mes_inicio", 1))
+    
+    # El saldo empieza en 0, a menos que el mes de inicio sea 0
+    saldo_relacionada = monto_total_relacionada if mes_inicio_rel == 0 else 0.0
+    
     tasa_mensual_rel = (rel_data["tasa_anual"] / 100) / 12
     frecuencia_rel = rel_data.get("frecuencia_pago", "Al Final")
     acumulado_trimestre_rel = 0
     
+    # --- INICIALIZACIÓN DEUDA PRIVADA (KPs) ---
     kps_activos = []
     for kp in data.get("lista_kps", []):
+        mes_ini_kp = int(kp.get("mes_inicio", 1))
+        # Si el KP inicia en el mes 0, ya tiene saldo. Si no, empieza en 0.
+        saldo_inicial_kp = kp["monto"] if mes_ini_kp == 0 else 0.0
+        
         kps_activos.append({
-            "saldo": kp["monto"],
+            "monto_total": kp["monto"], # Monto que prestarán
+            "mes_inicio": mes_ini_kp,   # Cuándo lo prestarán
+            "saldo": saldo_inicial_kp,  # Saldo vivo actual
             "tasa_mensual": (kp["tasa_anual"] / 100) / 12,
             "plazo": kp["plazo"],
             "frecuencia": kp.get("frecuencia_pago", "Mensual"), 
@@ -180,7 +185,7 @@ def calcular_flujo(data):
             "interes_acumulado_hist": 0
         })
 
-    # Recuperos
+    # Recuperos (Ventas)
     recuperos = []
     for p in data["plan_ventas"]:
         recuperos.append({"Mes": int(p["mes"]), "Monto": data["valor_venta_total"] * (p["pct"]/100)})
@@ -195,27 +200,30 @@ def calcular_flujo(data):
     equity_terreno = v_terr * (1 - pct_fin_terr)
     inversion_inicial = equity_terreno + v_otros_inicial
     
+    # Calculamos ingresos por deuda SOLAMENTE si mes_inicio == 0
+    ingreso_deuda_mes_0 = 0.0
+    if mes_inicio_rel == 0:
+        ingreso_deuda_mes_0 += monto_total_relacionada
+    for kp in kps_activos:
+        if kp["mes_inicio"] == 0:
+            ingreso_deuda_mes_0 += kp["monto_total"]
+            
+    # El flujo neto se beneficia si entra deuda en el mes 0
+    flujo_neto_ini = -inversion_inicial + ingreso_deuda_mes_0
+
     flujo.append({
         "Mes": 0,
         "Deuda Total": (saldo_const_uf + saldo_terr_uf) + (saldo_const_clp_nominal + saldo_terr_clp_nominal) + saldo_relacionada + sum(k['saldo'] for k in kps_activos),
         "Ingresos": 0.0,
+        "Ingresos Deuda": ingreso_deuda_mes_0,
         "Otros Costos (Op)": 0.0,
-        
-        "Int. Banco": 0.0, # Pagado
-        "Int. KPs": 0.0,   # Pagado
-        "Int. Relac.": 0.0,# Pagado
-        
-        # --- NUEVAS COLUMNAS (DEVENGADO) ---
-        "Devengado Banco": 0.0,
-        "Devengado KPs": 0.0,
-        "Devengado Relac.": 0.0,
-        # -----------------------------------
-        
+        "Int. Banco": 0.0, "Int. KPs": 0.0, "Int. Relac.": 0.0,
+        "Devengado Banco": 0.0, "Devengado KPs": 0.0, "Devengado Relac.": 0.0,
         "Pago Intereses Total": 0.0,
         "Pago Capital": 0.0,
         "Inversión (Equity)": inversion_inicial,
-        "Flujo Neto": -inversion_inicial,
-        "Flujo Acumulado": -inversion_inicial
+        "Flujo Neto": flujo_neto_ini,
+        "Flujo Acumulado": flujo_neto_ini
     })
     
     # Acumuladores KPI
@@ -225,11 +233,26 @@ def calcular_flujo(data):
     total_otros_costos_operativos = 0 
     
     factor_uf = 1.0 
-    acumulado_actual = -inversion_inicial
+    acumulado_actual = flujo_neto_ini
     mes_break_even = None
+    if acumulado_actual >= 0: mes_break_even = 0
     
     for m in range(1, horizonte + 1):
         factor_uf *= (1 + inflacion_mensual)
+        
+        # 0. VERIFICAR TOMA DE DEUDA EN ESTE MES (KP / RELACIONADA)
+        ingreso_deuda_este_mes = 0.0
+        
+        # A. Relacionada
+        if m == mes_inicio_rel:
+            saldo_relacionada += monto_total_relacionada
+            ingreso_deuda_este_mes += monto_total_relacionada
+            
+        # B. KPs
+        for kp in kps_activos:
+            if m == kp["mes_inicio"]:
+                kp["saldo"] += kp["monto_total"]
+                ingreso_deuda_este_mes += kp["monto_total"]
         
         # 1. GENERACIÓN DE DEUDA BANCARIA (GIROS)
         egreso_equity_const = 0
@@ -241,7 +264,7 @@ def calcular_flujo(data):
             saldo_const_uf += giro_banco * pct_uf
             saldo_const_clp_nominal += (giro_banco * pct_clp) * factor_uf 
 
-        # 2. CÁLCULO DE INTERESES DEL MES (DEVENGADOS)
+        # 2. CÁLCULO DE INTERESES DEL MES (DEVENGADOS SOBRE SALDO VIGENTE)
         
         # A. Banco
         int_uf_mes = (saldo_const_uf + saldo_terr_uf) * tasa_mensual_uf
@@ -251,16 +274,14 @@ def calcular_flujo(data):
         
         saldo_const_uf += int_uf_mes
         saldo_const_clp_nominal += int_clp_nom_mes
-        
-        # ACUMULAMOS EL DEVENGADO (Para KPIs)
         interes_acum_banco_total += int_banco_mes_en_uf
 
-        # B. KPs (Con Lógica de Frecuencia)
+        # B. KPs (Interés sobre saldo actual)
         int_kps_generado_mes = 0 
         total_interes_kp_exigible_hoy = 0 
         
         for kp in kps_activos:
-            if kp["saldo"] > 0:
+            if kp["saldo"] > 0: # Solo si ya se desembolsó el crédito
                 ik = kp["saldo"] * kp["tasa_mensual"]
                 kp["interes_acumulado_hist"] += ik
                 int_kps_generado_mes += ik
@@ -281,10 +302,9 @@ def calcular_flujo(data):
                 
                 total_interes_kp_exigible_hoy += interes_exigible_este_kp
 
-        # ACUMULAMOS EL DEVENGADO (Para KPIs)
         interes_acum_kps += int_kps_generado_mes
         
-        # C. Relacionada (Con Lógica de Frecuencia)
+        # C. Relacionada (Interés sobre saldo actual)
         int_rel_mes = 0
         interes_rel_exigible_hoy = 0
         
@@ -304,15 +324,15 @@ def calcular_flujo(data):
                 saldo_relacionada += int_rel_mes
                 interes_rel_exigible_hoy = 0
         
-        # ACUMULAMOS EL DEVENGADO (Para KPIs)
         interes_acum_relacionada += int_rel_mes
         
-        # 3. FLUJO OPERATIVO
+        # 3. FLUJO OPERATIVO (INCLUYE INGRESO DEUDA)
         ingreso_uf = sum([r["Monto"] for r in recuperos if r["Mes"] == m])
         gasto_operativo_mes = v_otros_mensual if (m <= recepcion + 6) else 0 
         total_otros_costos_operativos += gasto_operativo_mes
         
-        flujo_operativo = ingreso_uf - gasto_operativo_mes
+        # El flujo operativo base ahora incluye el ingreso por deuda de este mes
+        flujo_operativo = ingreso_uf + ingreso_deuda_este_mes - gasto_operativo_mes
         dinero_para_deuda = max(0.0, flujo_operativo)
         
         # --- LÓGICA DE PAGO OBLIGATORIO DE INTERESES (EQUITY) ---
@@ -429,6 +449,8 @@ def calcular_flujo(data):
         total_pagado_intereses = pago_banco_interes + pago_kps_interes + pago_rel_interes
         total_pagado_capital = (pago_banco_total + pago_kps_total + pago_rel_total) - total_pagado_intereses
         
+        # El flujo neto es lo que queda después de pagar deudas y construcción
+        # Recordar que flujo_operativo YA incluye el ingreso_deuda_este_mes
         flujo_neto_mes = dinero_para_deuda - egreso_equity_const 
         if flujo_operativo < 0:
             flujo_neto_mes = flujo_operativo - egreso_equity_const
@@ -448,6 +470,7 @@ def calcular_flujo(data):
             "Deuda Relac.": saldo_relacionada,
             "Deuda Total": deuda_banco_reporte + saldo_kps_reporte + saldo_relacionada,
             "Ingresos": ingreso_uf,
+            "Ingresos Deuda": ingreso_deuda_este_mes, # Valor visual
             "Otros Costos (Op)": gasto_operativo_mes,
             "Inversión (Equity)": egreso_equity_const,
             
@@ -455,11 +478,9 @@ def calcular_flujo(data):
             "Int. KPs": pago_kps_interes,
             "Int. Relac.": pago_rel_interes,
             
-            # --- GUARDAMOS DEVENGADO (ACUMULABLE) ---
             "Devengado Banco": int_banco_mes_en_uf,
             "Devengado KPs": int_kps_generado_mes,
             "Devengado Relac.": int_rel_mes,
-            # ---------------------------------------
             
             "Pago Intereses Total": total_pagado_intereses,
             "Pago Capital": total_pagado_capital,
@@ -559,30 +580,32 @@ with col_inputs:
 
             with st.expander("🤝 Deuda Privada (KPs y Relac.)", expanded=is_expanded):
                 st.markdown("##### Préstamo Relacionada")
-                cr1, cr2 = st.columns(2)
+                cr1, cr2, cr3 = st.columns(3)
                 data["prestamo_relacionada"]["monto"] = cr1.number_input("Monto (UF)", value=data["prestamo_relacionada"]["monto"], key=f"{scen_key}_rel_mnt")
                 data["prestamo_relacionada"]["tasa_anual"] = cr2.number_input("Tasa Anual (%)", value=data["prestamo_relacionada"]["tasa_anual"], step=0.1, key=f"{scen_key}_rel_tas")
+                data["prestamo_relacionada"]["mes_inicio"] = cr3.number_input("Mes Inicio", value=int(data["prestamo_relacionada"].get("mes_inicio", 1)), key=f"{scen_key}_rel_ini") # NUEVO INPUT
                 data["prestamo_relacionada"]["frecuencia_pago"] = st.selectbox("Pago Interés Relac.", ["Mensual", "Trimestral", "Al Final"], index=["Mensual", "Trimestral", "Al Final"].index(data["prestamo_relacionada"].get("frecuencia_pago", "Al Final")), key=f"{scen_key}_rel_freq")
 
                 st.markdown("---")
                 st.markdown("##### Inversionistas (KPs)")
                 
                 if st.button("➕ Agregar KP", key=f"add_kp_{scen_key}"):
-                    data["lista_kps"].append({"nombre": f"KP {len(data['lista_kps'])+1}", "monto": 1000.0, "tasa_anual": 10.0, "plazo": 24, "frecuencia_pago": "Mensual"})
+                    data["lista_kps"].append({"nombre": f"KP {len(data['lista_kps'])+1}", "monto": 1000.0, "tasa_anual": 10.0, "plazo": 24, "frecuencia_pago": "Mensual", "mes_inicio": 1})
                     st.rerun()
 
                 idx_kp_remove = []
                 for i, kp in enumerate(data["lista_kps"]):
                     st.markdown(f"**KP #{i+1}**")
-                    k1, k2 = st.columns(2)
+                    k1, k2, k3 = st.columns(3)
                     kp["monto"] = k1.number_input("Monto", value=float(kp["monto"]), key=f"kpm_{scen_key}_{i}")
                     kp["tasa_anual"] = k2.number_input("Tasa %", value=float(kp["tasa_anual"]), step=0.1, key=f"kpt_{scen_key}_{i}")
+                    kp["mes_inicio"] = k3.number_input("Mes Inicio", value=int(kp.get("mes_inicio", 1)), key=f"kpini_{scen_key}_{i}") # NUEVO INPUT
                     
-                    k3, k4 = st.columns([2, 1])
-                    kp["plazo"] = k3.number_input("Plazo", value=int(kp["plazo"]), key=f"kpp_{scen_key}_{i}")
-                    kp["frecuencia_pago"] = k3.selectbox("Pago Interés", ["Mensual", "Trimestral", "Al Final"], index=["Mensual", "Trimestral", "Al Final"].index(kp.get("frecuencia_pago", "Mensual")), key=f"kpf_{scen_key}_{i}")
+                    k4, k5 = st.columns([2, 1])
+                    kp["plazo"] = k4.number_input("Plazo", value=int(kp["plazo"]), key=f"kpp_{scen_key}_{i}")
+                    kp["frecuencia_pago"] = k4.selectbox("Pago Interés", ["Mensual", "Trimestral", "Al Final"], index=["Mensual", "Trimestral", "Al Final"].index(kp.get("frecuencia_pago", "Mensual")), key=f"kpf_{scen_key}_{i}")
                     
-                    if k4.button("🗑️", key=f"del_kp_{scen_key}_{i}"):
+                    if k5.button("🗑️", key=f"del_kp_{scen_key}_{i}"):
                         idx_kp_remove.append(i)
                     st.divider()
                 
@@ -639,7 +662,7 @@ with col_dash:
     st.markdown("#### 💳 Costos Financieros (Total Devengado)")
     with st.container():
         st.markdown('<div class="interest-card">', unsafe_allow_html=True)
-        st.markdown('<div class="interest-title">Desglose de Intereses Proyectados</div>', unsafe_allow_html=True)
+        st.markdown('<div class="interest-title">Desglose de Intereses Proyectados (Devengado)</div>', unsafe_allow_html=True)
         
         det = res["detalles_fin"]
         ic1, ic2, ic3, ic4 = st.columns(4)
@@ -653,7 +676,7 @@ with col_dash:
 
     with st.expander("📋 Tabla Detallada (Verificación de Pagos)", expanded=False):
         # 1. Definimos las columnas nuevas (desglosadas)
-        cols_show = ["Mes", "Ingresos", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
+        cols_show = ["Mes", "Ingresos", "Ingresos Deuda", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
         
         # 2. Crear copia para visualización
         df_display = res["df"][cols_show].copy()
@@ -663,6 +686,7 @@ with col_dash:
         total_row = {
             "Mes": "TOTAL",
             "Ingresos": df_display["Ingresos"].sum(),
+            "Ingresos Deuda": df_display["Ingresos Deuda"].sum(), # NUEVO TOTAL
             "Otros Costos (Op)": df_display["Otros Costos (Op)"].sum(),
             
             # Sumamos las columnas desglosadas (Pagado)
@@ -680,7 +704,7 @@ with col_dash:
         df_final = pd.concat([df_display, pd.DataFrame([total_row])], ignore_index=True)
 
         # 5. Formatear explícitamente con puntos
-        cols_nums = ["Ingresos", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
+        cols_nums = ["Ingresos", "Ingresos Deuda", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
         
         for col in cols_nums:
             df_final[col] = df_final[col].apply(lambda x: f"{x:,.0f} UF".replace(",", ".") if pd.notnull(x) else "0 UF")
@@ -693,6 +717,7 @@ with col_dash:
             column_config={
                 "Mes": st.column_config.TextColumn("Mes"),
                 "Ingresos": st.column_config.TextColumn("Ingresos"),
+                "Ingresos Deuda": st.column_config.TextColumn("Ingresos Deuda"), # NUEVA COLUMNA VISUAL
                 "Otros Costos (Op)": st.column_config.TextColumn("Otros Costos"),
                 "Int. Banco": st.column_config.TextColumn("Int. Banco (Pagado)"),
                 "Int. KPs": st.column_config.TextColumn("Int. KPs (Pagado)"),
@@ -706,7 +731,7 @@ with col_dash:
 
     # --- NUEVA SECCIÓN: ANÁLISIS POR HITOS (ESCENARIO REAL) ---
     st.markdown("---")
-    st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos")
+    st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos (Escenario Real - DEVENGADO)")
     
     # Obtener parámetros del escenario Real
     params_real = st.session_state.data_scenarios["Real"]
@@ -826,7 +851,7 @@ with col_dash:
         st.plotly_chart(fig_c, use_container_width=True)
 
     with c_table:
-        st.subheader("Resumen Escenarios")
+        st.subheader("Resumen Numérico")
         
         # Formateo visual para la tabla
         df_show = df_comp.copy()
@@ -861,4 +886,3 @@ with col_dash:
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
-
