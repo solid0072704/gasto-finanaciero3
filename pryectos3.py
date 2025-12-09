@@ -200,7 +200,7 @@ def calcular_flujo(data):
         "Otros Costos (Op)": 0.0,
         "Int. Banco": 0.0,
         "Int. KPs": 0.0,
-        "Int. Relac.": 0.0,
+        "Int. Relac.": 0.0, # IMPORTANTE: Tiene punto final
         "Pago Intereses Total": 0.0,
         "Pago Capital": 0.0,
         "Inversión (Equity)": inversion_inicial,
@@ -723,9 +723,10 @@ with col_dash:
         # Filtramos hasta el mes del hito (acumulado)
         df_cut = df_real[df_real["Mes"] <= ms["mes"]]
         
+        # IMPORTANTE: Usamos "Int. Relac." con punto, tal como se definió en calcular_flujo
         acum_banco = df_cut["Int. Banco"].sum()
         acum_kps = df_cut["Int. KPs"].sum()
-        acum_relac = df_cut["Int. Relac"].sum()
+        acum_relac = df_cut["Int. Relac."].sum() 
         total_acum = acum_banco + acum_kps + acum_relac
         
         pct_avance = (total_acum / total_costo_fin * 100) if total_costo_fin > 0 else 0
@@ -825,4 +826,3 @@ with c_table:
         hide_index=True,
         height=350
     )
-
