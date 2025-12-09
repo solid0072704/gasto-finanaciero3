@@ -639,7 +639,7 @@ with col_dash:
     st.markdown("#### 💳 Costos Financieros (Total Devengado)")
     with st.container():
         st.markdown('<div class="interest-card">', unsafe_allow_html=True)
-        st.markdown('<div class="interest-title">Desglose de Intereses Proyectados (Devengado)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="interest-title">Desglose de Intereses Proyectados</div>', unsafe_allow_html=True)
         
         det = res["detalles_fin"]
         ic1, ic2, ic3, ic4 = st.columns(4)
@@ -874,6 +874,7 @@ with col_dash:
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
+
 
 
 
