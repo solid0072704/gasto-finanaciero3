@@ -42,7 +42,6 @@ local_css()
 # --- 1. GESTIÓN DE ESTADO ---
 SCENARIOS = ["Real", "Optimista", "Pesimista"]
 
-# Inicializar estado de expansión del menú (Por defecto False = Cerrado)
 if 'menu_expanded' not in st.session_state:
     st.session_state.menu_expanded = False
 
@@ -176,7 +175,10 @@ def calcular_flujo(data):
         "Deuda Total": (saldo_const_uf + saldo_terr_uf) + (saldo_const_clp_nominal + saldo_terr_clp_nominal) + saldo_relacionada + sum(k['saldo'] for k in kps_activos),
         "Ingresos": 0.0,
         "Otros Costos (Op)": 0.0,
-        "Pago Intereses": 0.0,
+        "Int. Banco": 0.0, # NUEVO: Desglose
+        "Int. KPs": 0.0,   # NUEVO: Desglose
+        "Int. Relac.": 0.0,# NUEVO: Desglose
+        "Pago Intereses Total": 0.0,
         "Pago Capital": 0.0,
         "Inversión (Equity)": inversion_inicial,
         "Flujo Neto": -inversion_inicial,
@@ -396,7 +398,14 @@ def calcular_flujo(data):
             "Ingresos": ingreso_uf,
             "Otros Costos (Op)": gasto_operativo_mes,
             "Inversión (Equity)": egreso_equity_const,
-            "Pago Intereses": total_pagado_intereses,
+            
+            # --- NUEVO: GUARDAMOS EL DESGLOSE ---
+            "Int. Banco": pago_banco_interes,
+            "Int. KPs": pago_kps_interes,
+            "Int. Relac.": pago_rel_interes,
+            "Pago Intereses Total": total_pagado_intereses,
+            # ------------------------------------
+            
             "Pago Capital": total_pagado_capital,
             "Flujo Neto": flujo_neto_mes,
             "Flujo Acumulado": acumulado_actual
@@ -429,6 +438,10 @@ st.title("📊 Análisis Gasto financiero proyectos inmobiliarios")
 
 col_inputs, col_dash = st.columns([1.3, 2.7], gap="medium")
 
+# Lógica de cálculo inicial
+if 'calc_results' not in st.session_state:
+    st.session_state.calc_results = {name: calcular_flujo(st.session_state.data_scenarios[name]) for name in SCENARIOS}
+
 with col_inputs:
     st.markdown("### Configuración")
     
@@ -440,14 +453,17 @@ with col_inputs:
     if col_btn2.button("🔼 Colapsar Todo", key="btn_collapse", use_container_width=True):
         st.session_state.menu_expanded = False
         st.rerun()
+    
+    # --- BOTÓN DE PROCESAR ---
+    if st.button("🚀 Procesar y Actualizar", type="primary", use_container_width=True):
+        st.session_state.calc_results = {name: calcular_flujo(st.session_state.data_scenarios[name]) for name in SCENARIOS}
+        st.rerun()
     # ---------------------------------------------
     
     tabs = st.tabs(["🟦 Real", "🟩 Optimista", "🟥 Pesimista"])
     
     def render_scenario_inputs(scen_key):
         data = st.session_state.data_scenarios[scen_key]
-        
-        # Obtenemos el estado actual de expansión
         is_expanded = st.session_state.menu_expanded
         
         with st.container():
@@ -540,10 +556,10 @@ with col_inputs:
     with tabs[2]: render_scenario_inputs("Pesimista")
 
 # --- DASHBOARD ---
-results = {name: calcular_flujo(st.session_state.data_scenarios[name]) for name in SCENARIOS}
+# LEEMOS DESDE session_state EN LUGAR DE CALCULAR DIRECTAMENTE
+res = st.session_state.calc_results["Real"]
 
 with col_dash:
-    res = results["Real"]
     
     st.markdown("### 🏆 KPIs Escenario Real")
     k1, k2, k3, k4 = st.columns(4)
@@ -599,49 +615,57 @@ with col_dash:
     st.plotly_chart(fig_cash, use_container_width=True)
 
     with st.expander("📋 Tabla Detallada (Verificación de Pagos)", expanded=False):
-        cols_show = ["Mes", "Ingresos", "Otros Costos (Op)", "Pago Intereses", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
+        # 1. Definimos las columnas nuevas (desglosadas)
+        cols_show = ["Mes", "Ingresos", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
         
-        # 1. Crear copia para visualización
+        # 2. Crear copia para visualización
         df_display = df[cols_show].copy()
         df_display["Mes"] = df_display["Mes"].astype(str)
 
-        # 2. Calcular fila de TOTAL
+        # 3. Calcular fila de TOTAL
         total_row = {
             "Mes": "TOTAL",
             "Ingresos": df_display["Ingresos"].sum(),
             "Otros Costos (Op)": df_display["Otros Costos (Op)"].sum(),
-            "Pago Intereses": df_display["Pago Intereses"].sum(),
+            
+            # Sumamos las columnas desglosadas
+            "Int. Banco": df_display["Int. Banco"].sum(),
+            "Int. KPs": df_display["Int. KPs"].sum(),
+            "Int. Relac.": df_display["Int. Relac."].sum(),
+            
             "Pago Capital": df_display["Pago Capital"].sum(),
             "Flujo Neto": df_display["Flujo Neto"].sum(),
-            "Flujo Acumulado": df_display["Flujo Neto"].sum(), # El acumulado final es la suma de netos
-            "Deuda Total": 0.0 # No tiene sentido sumar deuda stock
+            "Flujo Acumulado": df_display["Flujo Neto"].sum(), 
+            "Deuda Total": 0.0 
         }
 
-        # 3. Concatenar
+        # 4. Concatenar
         df_final = pd.concat([df_display, pd.DataFrame([total_row])], ignore_index=True)
 
-        # 4. Formatear explícitamente con puntos (Convertimos a string)
-        cols_nums = ["Ingresos", "Otros Costos (Op)", "Pago Intereses", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
+        # 5. Formatear explícitamente con puntos
+        cols_nums = ["Ingresos", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
         
-        # Función lambda que formatea: 1,000 -> 1.000
         for col in cols_nums:
             df_final[col] = df_final[col].apply(lambda x: f"{x:,.0f} UF".replace(",", ".") if pd.notnull(x) else "0 UF")
 
-        # 5. Mostrar
+        # 6. Mostrar con Configuración de Columnas
         st.dataframe(
             df_final, 
             use_container_width=True, 
             height=400,
             column_config={
                 "Mes": st.column_config.TextColumn("Mes"),
-                # Las columnas ya son texto formateado, no aplicamos NumberColumn para no sobreescribir el formato
                 "Ingresos": st.column_config.TextColumn("Ingresos"),
                 "Otros Costos (Op)": st.column_config.TextColumn("Otros Costos"),
-                "Pago Intereses": st.column_config.TextColumn("Intereses"),
+                
+                # Nuevas columnas
+                "Int. Banco": st.column_config.TextColumn("Int. Banco"),
+                "Int. KPs": st.column_config.TextColumn("Int. KPs"),
+                "Int. Relac.": st.column_config.TextColumn("Int. Relac."),
+                
                 "Pago Capital": st.column_config.TextColumn("Capital"),
                 "Flujo Neto": st.column_config.TextColumn("Flujo Neto"),
                 "Flujo Acumulado": st.column_config.TextColumn("Acumulado"),
                 "Deuda Total": st.column_config.TextColumn("Deuda Viva"),
             }
         )
-
