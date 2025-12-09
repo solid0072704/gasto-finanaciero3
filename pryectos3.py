@@ -90,7 +90,7 @@ def get_default_config(type_scen):
         "valor_contrato": constr,
         "pct_fin_construccion": 80,
         "duracion_obra": 18,
-        "mes_recepcion": 22, # Valor por defecto
+        "mes_recepcion": 22,
         "saldo_inicial_uf": 0.0,
         
         # OTROS COSTOS
@@ -104,6 +104,7 @@ def get_default_config(type_scen):
         "pct_deuda_pesos": 0,     
         "tasa_anual_clp": tasa_clp, 
         "inflacion_anual": inflacion,
+        "pagar_intereses_construccion": False,
 
         # Deuda Privada
         "prestamo_relacionada": {
@@ -142,6 +143,7 @@ def calcular_flujo(data):
     rango_terr = data.get("rango_pago_terreno", [1, 60])
     inicio_pago_t, fin_pago_t = rango_terr[0], rango_terr[1]
     prioridad_t = data.get("prioridad_terreno", False)
+    pagar_int_const = data.get("pagar_intereses_construccion", False)
     
     pct_clp = data["pct_deuda_pesos"] / 100.0
     pct_uf = 1.0 - pct_clp
@@ -198,9 +200,17 @@ def calcular_flujo(data):
         "Deuda Total": (saldo_const_uf + saldo_terr_uf) + (saldo_const_clp_nominal + saldo_terr_clp_nominal) + saldo_relacionada + sum(k['saldo'] for k in kps_activos),
         "Ingresos": 0.0,
         "Otros Costos (Op)": 0.0,
-        "Int. Banco": 0.0,
-        "Int. KPs": 0.0,
-        "Int. Relac.": 0.0,
+        
+        "Int. Banco": 0.0, # Pagado
+        "Int. KPs": 0.0,   # Pagado
+        "Int. Relac.": 0.0,# Pagado
+        
+        # --- NUEVAS COLUMNAS (DEVENGADO) ---
+        "Devengado Banco": 0.0,
+        "Devengado KPs": 0.0,
+        "Devengado Relac.": 0.0,
+        # -----------------------------------
+        
         "Pago Intereses Total": 0.0,
         "Pago Capital": 0.0,
         "Inversión (Equity)": inversion_inicial,
@@ -301,6 +311,16 @@ def calcular_flujo(data):
         flujo_operativo = ingreso_uf - gasto_operativo_mes
         dinero_para_deuda = max(0.0, flujo_operativo)
         
+        # --- LÓGICA DE PAGO OBLIGATORIO DE INTERESES (EQUITY) ---
+        aporte_equity_interes = 0.0
+        
+        if pagar_int_const:
+            if dinero_para_deuda < int_banco_mes_en_uf:
+                deficit = int_banco_mes_en_uf - dinero_para_deuda
+                aporte_equity_interes = deficit
+                dinero_para_deuda += deficit 
+                egreso_equity_const += deficit 
+        
         # 4. WATERFALL DE PAGOS
         
         # --- A. BANCO ---
@@ -314,7 +334,12 @@ def calcular_flujo(data):
 
         if dinero_para_deuda > 0 and deuda_banco_total > 0:
             monto_a_pagar_banco = min(deuda_banco_total, dinero_para_deuda)
+            # Prioridad Interés
             pago_banco_interes = min(monto_a_pagar_banco, int_banco_mes_en_uf)
+            
+            if pagar_int_const and pago_banco_interes < int_banco_mes_en_uf and monto_a_pagar_banco >= int_banco_mes_en_uf:
+                pago_banco_interes = int_banco_mes_en_uf
+
             pago_banco_capital = monto_a_pagar_banco - pago_banco_interes
             
             es_rango_terreno = (m >= inicio_pago_t and m <= fin_pago_t)
@@ -425,8 +450,14 @@ def calcular_flujo(data):
             "Int. Banco": pago_banco_interes,
             "Int. KPs": pago_kps_interes,
             "Int. Relac.": pago_rel_interes,
-            "Pago Intereses Total": total_pagado_intereses,
             
+            # --- GUARDAMOS DEVENGADO (ACUMULABLE) ---
+            "Devengado Banco": int_banco_mes_en_uf,
+            "Devengado KPs": int_kps_generado_mes,
+            "Devengado Relac.": int_rel_mes,
+            # ---------------------------------------
+            
+            "Pago Intereses Total": total_pagado_intereses,
             "Pago Capital": total_pagado_capital,
             "Flujo Neto": flujo_neto_mes,
             "Flujo Acumulado": acumulado_actual
@@ -513,6 +544,9 @@ with col_inputs:
                 data["tasa_anual_uf"] = c1.number_input("Tasa UF", value=data["tasa_anual_uf"], step=0.1, key=f"{scen_key}_tuf")
                 data["tasa_anual_clp"] = c2.number_input("Tasa CLP", value=data["tasa_anual_clp"], step=0.1, key=f"{scen_key}_tclp")
                 data["inflacion_anual"] = c3.number_input("Infl. %", value=data["inflacion_anual"], step=0.1, key=f"{scen_key}_inf")
+                
+                # CHECKBOX DE PAGO DE INTERESES DURANTE CONSTRUCCION
+                data["pagar_intereses_construccion"] = st.checkbox("Pagar intereses durante construcción (Equity)", value=data.get("pagar_intereses_construccion", False), key=f"{scen_key}_pay_int")
                 
                 st.markdown("**Pago Terreno**")
                 rango_val = data.get("rango_pago_terreno", [1, 60])
@@ -728,19 +762,19 @@ with col_dash:
         # Filtramos hasta el mes del hito (acumulado)
         df_cut = df_real[df_real["Mes"] <= ms["mes"]]
         
-        # IMPORTANTE: Usamos "Int. Relac." con punto
-        acum_banco = df_cut["Int. Banco"].sum()
-        acum_kps = df_cut["Int. KPs"].sum()
-        acum_relac = df_cut["Int. Relac."].sum() 
+        # IMPORTANTE: Usamos LAS NUEVAS COLUMNAS "Devengado" para este análisis
+        acum_banco = df_cut["Devengado Banco"].sum()
+        acum_kps = df_cut["Devengado KPs"].sum()
+        acum_relac = df_cut["Devengado Relac."].sum() 
         total_acum = acum_banco + acum_kps + acum_relac
         
         pct_avance = (total_acum / total_costo_fin * 100) if total_costo_fin > 0 else 0
         
         milestone_data.append({
             "Hito": f"{ms['nombre']} (Mes {ms['mes']})",
-            "Acum. Banco": fmt_nums(acum_banco),
-            "Acum. KPs": fmt_nums(acum_kps),
-            "Acum. Relac.": fmt_nums(acum_relac),
+            "Acum. Banco (Dev.)": fmt_nums(acum_banco),
+            "Acum. KPs (Dev.)": fmt_nums(acum_kps),
+            "Acum. Relac. (Dev.)": fmt_nums(acum_relac),
             "Total Acumulado": fmt_nums(total_acum),
             "% del Total Fin.": f"{pct_avance:.1f}%"
         })
