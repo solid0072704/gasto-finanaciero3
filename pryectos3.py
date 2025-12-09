@@ -706,7 +706,7 @@ with col_dash:
 
     # --- NUEVA SECCIÓN: ANÁLISIS POR HITOS (ESCENARIO REAL) ---
     st.markdown("---")
-    st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos (Escenario Real - DEVENGADO)")
+    st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos")
     
     # Obtener parámetros del escenario Real
     params_real = st.session_state.data_scenarios["Real"]
@@ -874,5 +874,6 @@ with col_dash:
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
+
 
 
