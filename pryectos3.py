@@ -90,7 +90,7 @@ def get_default_config(type_scen):
         "valor_contrato": constr,
         "pct_fin_construccion": 80,
         "duracion_obra": 18,
-        "mes_recepcion": 22,
+        "mes_recepcion": 22, # Valor por defecto
         "saldo_inicial_uf": 0.0,
         
         # OTROS COSTOS
@@ -200,7 +200,7 @@ def calcular_flujo(data):
         "Otros Costos (Op)": 0.0,
         "Int. Banco": 0.0,
         "Int. KPs": 0.0,
-        "Int. Relac.": 0.0, # IMPORTANTE: Tiene punto final
+        "Int. Relac.": 0.0,
         "Pago Intereses Total": 0.0,
         "Pago Capital": 0.0,
         "Inversión (Equity)": inversion_inicial,
@@ -493,7 +493,12 @@ with col_inputs:
                 data["pct_fin_terreno"] = st.slider("% Fin. Terreno", 0, 100, data["pct_fin_terreno"], key=f"{scen_key}_fin_t")
                 data["valor_contrato"] = st.number_input("Costo Const. (UF)", value=data["valor_contrato"], key=f"{scen_key}_vc")
                 data["pct_fin_construccion"] = st.slider("% Fin. Construcción", 0, 100, data["pct_fin_construccion"], key=f"{scen_key}_fin_c")
-                data["duracion_obra"] = st.number_input("Meses Obra", value=data["duracion_obra"], key=f"{scen_key}_dur")
+                
+                # --- NUEVA OPCIÓN: MES DE RECEPCIÓN FINAL ---
+                c_obra, c_recep = st.columns(2)
+                data["duracion_obra"] = c_obra.number_input("Meses Obra", value=data["duracion_obra"], key=f"{scen_key}_dur")
+                data["mes_recepcion"] = c_recep.number_input("Mes Recepción Final", value=data["mes_recepcion"], key=f"{scen_key}_recep")
+                
                 data["saldo_inicial_uf"] = st.number_input("Saldo Inicial Banco (UF)", value=data.get("saldo_inicial_uf", 0.0), key=f"{scen_key}_ini")
                 
                 st.markdown("---")
@@ -723,7 +728,7 @@ with col_dash:
         # Filtramos hasta el mes del hito (acumulado)
         df_cut = df_real[df_real["Mes"] <= ms["mes"]]
         
-        # IMPORTANTE: Usamos "Int. Relac." con punto, tal como se definió en calcular_flujo
+        # IMPORTANTE: Usamos "Int. Relac." con punto
         acum_banco = df_cut["Int. Banco"].sum()
         acum_kps = df_cut["Int. KPs"].sum()
         acum_relac = df_cut["Int. Relac."].sum() 
