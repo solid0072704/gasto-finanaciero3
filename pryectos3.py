@@ -10,7 +10,7 @@ def local_css():
     st.markdown("""
     <style>
         .stApp { background-color: #0E1117 !important; }
-     
+        
         /* FUENTES MÁS GRANDES (+3 aprox) */
         h1, h2, h3, h4, h5, h6, .stMarkdown, p, label, span, div { 
             color: #FAFAFA !important; 
@@ -251,6 +251,8 @@ def calcular_flujo(data):
         
         saldo_const_uf += int_uf_mes
         saldo_const_clp_nominal += int_clp_nom_mes
+        
+        # ACUMULAMOS EL DEVENGADO (Para KPIs)
         interes_acum_banco_total += int_banco_mes_en_uf
 
         # B. KPs (Con Lógica de Frecuencia)
@@ -279,6 +281,7 @@ def calcular_flujo(data):
                 
                 total_interes_kp_exigible_hoy += interes_exigible_este_kp
 
+        # ACUMULAMOS EL DEVENGADO (Para KPIs)
         interes_acum_kps += int_kps_generado_mes
         
         # C. Relacionada (Con Lógica de Frecuencia)
@@ -301,6 +304,7 @@ def calcular_flujo(data):
                 saldo_relacionada += int_rel_mes
                 interes_rel_exigible_hoy = 0
         
+        # ACUMULAMOS EL DEVENGADO (Para KPIs)
         interes_acum_relacionada += int_rel_mes
         
         # 3. FLUJO OPERATIVO
@@ -631,11 +635,11 @@ with col_dash:
     k3.metric("Mes flujo positivo", f"Mes {res['break_even']}" if res['break_even'] else "N/A")
     k4.metric("Peak Deuda", f"{res['peak_deuda']:,.0f} UF")
 
-    # --- TARJETA DE INTERESES ---
-    st.markdown("#### 💳 Costos Financieros (Acumulado)")
+    # --- TARJETA DE INTERESES (DEVENGADO TOTAL) ---
+    st.markdown("#### 💳 Costos Financieros (Total Devengado)")
     with st.container():
         st.markdown('<div class="interest-card">', unsafe_allow_html=True)
-        st.markdown('<div class="interest-title">Desglose de Intereses Proyectados</div>', unsafe_allow_html=True)
+        st.markdown('<div class="interest-title">Desglose de Intereses Proyectados (Devengado)</div>', unsafe_allow_html=True)
         
         det = res["detalles_fin"]
         ic1, ic2, ic3, ic4 = st.columns(4)
@@ -647,42 +651,12 @@ with col_dash:
         
         st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown("### 🧱 Composición Deuda Total")
-    df = res["df"]
-    
-    fig_stack = go.Figure()
-    fig_stack.add_trace(go.Scatter(
-        x=df["Mes"], y=df["Deuda Banco"], mode='lines', stackgroup='one', name='Banco', line=dict(color='#3B82F6')
-    ))
-    fig_stack.add_trace(go.Scatter(
-        x=df["Mes"], y=df["Deuda KPs"], mode='lines', stackgroup='one', name='KPs', line=dict(color='#A855F7')
-    ))
-    fig_stack.add_trace(go.Scatter(
-        x=df["Mes"], y=df["Deuda Relac."], mode='lines', stackgroup='one', name='Relacionada', line=dict(color='#F97316')
-    ))
-    fig_stack.update_layout(template="plotly_dark", height=300, margin=dict(t=20, b=20, l=20, r=20), font=dict(size=15))
-    st.plotly_chart(fig_stack, use_container_width=True)
-
-    st.markdown("### 🌊 Flujo de Caja")
-    fig_cash = go.Figure()
-    fig_cash.add_trace(go.Bar(
-        x=df["Mes"], y=df["Flujo Neto"], name="Neto Mensual",
-        marker_color=df["Flujo Neto"].apply(lambda x: '#10B981' if x >= 0 else '#EF4444')
-    ))
-    fig_cash.add_trace(go.Scatter(
-        x=df["Mes"], y=df["Flujo Acumulado"], name="Acumulado", mode='lines',
-        line=dict(color='#FACC15', width=3, dash='dot')
-    ))
-    fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
-    fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
-    st.plotly_chart(fig_cash, use_container_width=True)
-
     with st.expander("📋 Tabla Detallada (Verificación de Pagos)", expanded=False):
         # 1. Definimos las columnas nuevas (desglosadas)
         cols_show = ["Mes", "Ingresos", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
         
         # 2. Crear copia para visualización
-        df_display = df[cols_show].copy()
+        df_display = res["df"][cols_show].copy()
         df_display["Mes"] = df_display["Mes"].astype(str)
 
         # 3. Calcular fila de TOTAL
@@ -691,7 +665,7 @@ with col_dash:
             "Ingresos": df_display["Ingresos"].sum(),
             "Otros Costos (Op)": df_display["Otros Costos (Op)"].sum(),
             
-            # Sumamos las columnas desglosadas
+            # Sumamos las columnas desglosadas (Pagado)
             "Int. Banco": df_display["Int. Banco"].sum(),
             "Int. KPs": df_display["Int. KPs"].sum(),
             "Int. Relac.": df_display["Int. Relac."].sum(),
@@ -720,9 +694,9 @@ with col_dash:
                 "Mes": st.column_config.TextColumn("Mes"),
                 "Ingresos": st.column_config.TextColumn("Ingresos"),
                 "Otros Costos (Op)": st.column_config.TextColumn("Otros Costos"),
-                "Int. Banco": st.column_config.TextColumn("Int. Banco"),
-                "Int. KPs": st.column_config.TextColumn("Int. KPs"),
-                "Int. Relac.": st.column_config.TextColumn("Int. Relac."),
+                "Int. Banco": st.column_config.TextColumn("Int. Banco (Pagado)"),
+                "Int. KPs": st.column_config.TextColumn("Int. KPs (Pagado)"),
+                "Int. Relac.": st.column_config.TextColumn("Int. Relac. (Pagado)"),
                 "Pago Capital": st.column_config.TextColumn("Capital"),
                 "Flujo Neto": st.column_config.TextColumn("Flujo Neto"),
                 "Flujo Acumulado": st.column_config.TextColumn("Acumulado"),
@@ -732,7 +706,7 @@ with col_dash:
 
     # --- NUEVA SECCIÓN: ANÁLISIS POR HITOS (ESCENARIO REAL) ---
     st.markdown("---")
-    st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos (Escenario Real)")
+    st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos (Escenario Real - DEVENGADO)")
     
     # Obtener parámetros del escenario Real
     params_real = st.session_state.data_scenarios["Real"]
@@ -763,6 +737,7 @@ with col_dash:
         df_cut = df_real[df_real["Mes"] <= ms["mes"]]
         
         # IMPORTANTE: Usamos LAS NUEVAS COLUMNAS "Devengado" para este análisis
+        # Estas columnas guardan lo que se generó, independientemente de si se pagó.
         acum_banco = df_cut["Devengado Banco"].sum()
         acum_kps = df_cut["Devengado KPs"].sum()
         acum_relac = df_cut["Devengado Relac."].sum() 
@@ -783,87 +758,120 @@ with col_dash:
     st.dataframe(df_milestones, use_container_width=True, hide_index=True)
 
 
-# --- SECCIÓN COMPARATIVA (AL FINAL) ---
-st.markdown("---")
-st.header("⚖️ Comparativa de Escenarios")
+    # --- SECCIÓN COMPARATIVA (AL FINAL) ---
+    st.markdown("---")
+    st.header("⚖️ Comparativa de Escenarios")
 
-# 1. Preparar Datos para Comparar
-comp_data = []
-for sc in SCENARIOS:
-    # Check if result exists
-    if sc in st.session_state.calc_results:
-        r = st.session_state.calc_results[sc]
-        comp_data.append({
-            "Escenario": sc,
-            "Int. Banco (UF)": r["detalles_fin"]["banco"],
-            "Int. KPs (UF)": r["detalles_fin"]["kps"],
-            "Int. Relac. (UF)": r["detalles_fin"]["relacionada"],
-            "Total Intereses (UF)": r["costo_financiero_total"],
-            "Mes flujo positivo": r["break_even"] if r["break_even"] is not None else "N/A"
-        })
+    # 1. Preparar Datos para Comparar
+    comp_data = []
+    for sc in SCENARIOS:
+        # Check if result exists
+        if sc in st.session_state.calc_results:
+            r = st.session_state.calc_results[sc]
+            comp_data.append({
+                "Escenario": sc,
+                "Int. Banco (Dev.)": r["detalles_fin"]["banco"],
+                "Int. KPs (Dev.)": r["detalles_fin"]["kps"],
+                "Int. Relac. (Dev.)": r["detalles_fin"]["relacionada"],
+                "Total Intereses (Dev.)": r["costo_financiero_total"],
+                "Mes Break Even": r["break_even"] if r["break_even"] is not None else "N/A"
+            })
 
-df_comp = pd.DataFrame(comp_data)
+    df_comp = pd.DataFrame(comp_data)
 
-# 2. Layout Visual
-c_chart, c_table = st.columns([1.5, 1])
+    # 2. Layout Visual
+    c_chart, c_table = st.columns([1.5, 1])
 
-with c_chart:
-    st.subheader("Costos Financieros por Escenario")
-    fig_c = go.Figure()
+    with c_chart:
+        st.subheader("Costos Financieros por Escenario (Devengado)")
+        fig_c = go.Figure()
+        
+        # Barra Banco
+        fig_c.add_trace(go.Bar(
+            name='Banco', 
+            x=df_comp['Escenario'], 
+            y=df_comp['Int. Banco (Dev.)'], 
+            marker_color='#3B82F6',
+            text=df_comp['Int. Banco (Dev.)'].apply(fmt_nums), # <--- Texto con el valor
+            textposition='auto' # <--- Posición automática
+        ))
+        
+        # Barra KPs
+        fig_c.add_trace(go.Bar(
+            name='KPs', 
+            x=df_comp['Escenario'], 
+            y=df_comp['Int. KPs (Dev.)'], 
+            marker_color='#A855F7',
+            text=df_comp['Int. KPs (Dev.)'].apply(fmt_nums), # <--- Texto con el valor
+            textposition='auto'
+        ))
+        
+        # Barra Relacionada
+        fig_c.add_trace(go.Bar(
+            name='Relacionada', 
+            x=df_comp['Escenario'], 
+            y=df_comp['Int. Relac. (Dev.)'], 
+            marker_color='#F97316',
+            text=df_comp['Int. Relac. (Dev.)'].apply(fmt_nums), # <--- Texto con el valor
+            textposition='auto'
+        ))
+        
+        fig_c.update_layout(
+            barmode='group', 
+            template="plotly_dark", 
+            height=350, 
+            legend_title="Tipo Interés", 
+            font=dict(size=15) # Mantenemos la fuente grande
+        )
+        st.plotly_chart(fig_c, use_container_width=True)
+
+    with c_table:
+        st.subheader("Resumen Numérico")
+        
+        # Formateo visual para la tabla
+        df_show = df_comp.copy()
+        cols_num = ["Int. Banco (Dev.)", "Int. KPs (Dev.)", "Int. Relac. (Dev.)", "Total Intereses (Dev.)"]
+        for col in cols_num:
+            df_show[col] = df_show[col].apply(fmt_nums)
+        
+        st.dataframe(
+            df_show, 
+            use_container_width=True, 
+            hide_index=True,
+            height=350
+        )
+
+    # --- GRÁFICOS VISUALES AL FINAL ---
+    st.markdown("---")
+    st.header("📈 Visualización de Flujos y Deuda (Escenario Real)")
     
-    # Barra Banco
-    fig_c.add_trace(go.Bar(
-        name='Banco', 
-        x=df_comp['Escenario'], 
-        y=df_comp['Int. Banco (UF)'], 
-        marker_color='#3B82F6',
-        text=df_comp['Int. Banco (UF)'].apply(fmt_nums), # <--- Texto con el valor
-        textposition='auto' # <--- Posición automática
+    st.markdown("### 🧱 Composición Deuda Total")
+    df = res["df"]
+    
+    fig_stack = go.Figure()
+    fig_stack.add_trace(go.Scatter(
+        x=df["Mes"], y=df["Deuda Banco"], mode='lines', stackgroup='one', name='Banco', line=dict(color='#3B82F6')
     ))
-    
-    # Barra KPs
-    fig_c.add_trace(go.Bar(
-        name='KPs', 
-        x=df_comp['Escenario'], 
-        y=df_comp['Int. KPs (UF)'], 
-        marker_color='#A855F7',
-        text=df_comp['Int. KPs (UF)'].apply(fmt_nums), # <--- Texto con el valor
-        textposition='auto'
+    fig_stack.add_trace(go.Scatter(
+        x=df["Mes"], y=df["Deuda KPs"], mode='lines', stackgroup='one', name='KPs', line=dict(color='#A855F7')
     ))
-    
-    # Barra Relacionada
-    fig_c.add_trace(go.Bar(
-        name='Relacionada', 
-        x=df_comp['Escenario'], 
-        y=df_comp['Int. Relac. (UF)'], 
-        marker_color='#F97316',
-        text=df_comp['Int. Relac. (UF)'].apply(fmt_nums), # <--- Texto con el valor
-        textposition='auto'
+    fig_stack.add_trace(go.Scatter(
+        x=df["Mes"], y=df["Deuda Relac."], mode='lines', stackgroup='one', name='Relacionada', line=dict(color='#F97316')
     ))
-    
-    fig_c.update_layout(
-        barmode='group', 
-        template="plotly_dark", 
-        height=350, 
-        legend_title="Tipo Interés", 
-        font=dict(size=15) # Mantenemos la fuente grande
-    )
-    st.plotly_chart(fig_c, use_container_width=True)
+    fig_stack.update_layout(template="plotly_dark", height=300, margin=dict(t=20, b=20, l=20, r=20), font=dict(size=15))
+    st.plotly_chart(fig_stack, use_container_width=True)
 
-with c_table:
-    st.subheader("Resumen Escenarios")
-    
-    # Formateo visual para la tabla
-    df_show = df_comp.copy()
-    cols_num = ["Int. Banco (UF)", "Int. KPs (UF)", "Int. Relac. (UF)", "Total Intereses (UF)"]
-    for col in cols_num:
-        df_show[col] = df_show[col].apply(fmt_nums)
-    
-    st.dataframe(
-        df_show, 
-        use_container_width=True, 
-        hide_index=True,
-        height=350
-    )
-
+    st.markdown("### 🌊 Flujo de Caja")
+    fig_cash = go.Figure()
+    fig_cash.add_trace(go.Bar(
+        x=df["Mes"], y=df["Flujo Neto"], name="Neto Mensual",
+        marker_color=df["Flujo Neto"].apply(lambda x: '#10B981' if x >= 0 else '#EF4444')
+    ))
+    fig_cash.add_trace(go.Scatter(
+        x=df["Mes"], y=df["Flujo Acumulado"], name="Acumulado", mode='lines',
+        line=dict(color='#FACC15', width=3, dash='dot')
+    ))
+    fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
+    fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
+    st.plotly_chart(fig_cash, use_container_width=True)
 
