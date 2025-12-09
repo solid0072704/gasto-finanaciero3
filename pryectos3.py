@@ -845,6 +845,9 @@ with col_dash:
     st.markdown("---")
     st.header("📈 Visualización de Flujo de Caja (Escenario Real)")
     
+    # IMPORTANTE: Definimos 'df' aquí para que el gráfico final funcione correctamente
+    df = res["df"]
+
     st.markdown("### 🌊 Flujo de Caja")
     fig_cash = go.Figure()
     fig_cash.add_trace(go.Bar(
@@ -858,7 +861,3 @@ with col_dash:
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
-
-
-
-
