@@ -10,10 +10,25 @@ def local_css():
     st.markdown("""
     <style>
         .stApp { background-color: #0E1117 !important; }
-        h1, h2, h3, h4, h5, h6, .stMarkdown, p, label, span { color: #FAFAFA !important; font-family: 'Segoe UI', sans-serif; }
-        div[data-baseweb="input"] { background-color: #262730 !important; color: white !important; border: 1px solid #4B5563; }
+        
+        /* FUENTES MÁS GRANDES (+3 aprox) */
+        h1, h2, h3, h4, h5, h6, .stMarkdown, p, label, span, div { 
+            color: #FAFAFA !important; 
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 18px !important; /* Aumentado */
+        }
+        
+        /* Aumentar tamaño inputs */
+        div[data-baseweb="input"] { 
+            background-color: #262730 !important; 
+            color: white !important; 
+            border: 1px solid #4B5563; 
+            font-size: 18px !important;
+        }
+        
         div.stVerticalBlock, div[data-testid="stExpander"] { background-color: #1F2937; border-radius: 12px; border: 1px solid #374151; }
         
+        /* Tarjeta de intereses */
         .interest-card {
             background-color: #1F2937;
             padding: 20px;
@@ -24,14 +39,22 @@ def local_css():
         }
         .interest-title {
             color: #9CA3AF;
-            font-size: 0.9em;
+            font-size: 1.1em !important; /* Más grande */
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            margin-bottom: 10px;
+            margin-bottom: 15px;
         }
         
-        div[data-testid="stDataFrame"] { width: 100%; }
+        div[data-testid="stDataFrame"] { width: 100%; font-size: 18px !important; }
         
+        /* Aumentar tamaño de los KPIs (Metrics) */
+        div[data-testid="stMetricValue"] {
+            font-size: 34px !important; /* + grande */
+        }
+        div[data-testid="stMetricLabel"] {
+            font-size: 18px !important;
+        }
+
         /* Botones pequeños para el menú */
         .small-btn { margin-bottom: 10px; }
     </style>
@@ -595,7 +618,7 @@ with col_dash:
     fig_stack.add_trace(go.Scatter(
         x=df["Mes"], y=df["Deuda Relac."], mode='lines', stackgroup='one', name='Relacionada', line=dict(color='#F97316')
     ))
-    fig_stack.update_layout(template="plotly_dark", height=300, margin=dict(t=20, b=20, l=20, r=20))
+    fig_stack.update_layout(template="plotly_dark", height=300, margin=dict(t=20, b=20, l=20, r=20), font=dict(size=15))
     st.plotly_chart(fig_stack, use_container_width=True)
 
     st.markdown("### 🌊 Flujo de Caja")
@@ -609,7 +632,7 @@ with col_dash:
         line=dict(color='#FACC15', width=3, dash='dot')
     ))
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
-    fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True)
+    fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
 
     with st.expander("📋 Tabla Detallada (Verificación de Pagos)", expanded=False):
@@ -655,9 +678,12 @@ with col_dash:
                 "Mes": st.column_config.TextColumn("Mes"),
                 "Ingresos": st.column_config.TextColumn("Ingresos"),
                 "Otros Costos (Op)": st.column_config.TextColumn("Otros Costos"),
+                
+                # Nuevas columnas
                 "Int. Banco": st.column_config.TextColumn("Int. Banco"),
                 "Int. KPs": st.column_config.TextColumn("Int. KPs"),
                 "Int. Relac.": st.column_config.TextColumn("Int. Relac."),
+                
                 "Pago Capital": st.column_config.TextColumn("Capital"),
                 "Flujo Neto": st.column_config.TextColumn("Flujo Neto"),
                 "Flujo Acumulado": st.column_config.TextColumn("Acumulado"),
@@ -695,7 +721,7 @@ with c_chart:
     fig_c.add_trace(go.Bar(name='Banco', x=df_comp['Escenario'], y=df_comp['Int. Banco (UF)'], marker_color='#3B82F6'))
     fig_c.add_trace(go.Bar(name='KPs', x=df_comp['Escenario'], y=df_comp['Int. KPs (UF)'], marker_color='#A855F7'))
     fig_c.add_trace(go.Bar(name='Relacionada', x=df_comp['Escenario'], y=df_comp['Int. Relac. (UF)'], marker_color='#F97316'))
-    fig_c.update_layout(barmode='group', template="plotly_dark", height=350, legend_title="Tipo Interés")
+    fig_c.update_layout(barmode='group', template="plotly_dark", height=350, legend_title="Tipo Interés", font=dict(size=15))
     st.plotly_chart(fig_c, use_container_width=True)
 
 with c_table:
