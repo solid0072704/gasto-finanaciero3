@@ -799,7 +799,7 @@ for sc in SCENARIOS:
             "Int. KPs (UF)": r["detalles_fin"]["kps"],
             "Int. Relac. (UF)": r["detalles_fin"]["relacionada"],
             "Total Intereses (UF)": r["costo_financiero_total"],
-            "Mes Break Even": r["break_even"] if r["break_even"] is not None else "N/A"
+            "Mes flujo positivo": r["break_even"] if r["break_even"] is not None else "N/A"
         })
 
 df_comp = pd.DataFrame(comp_data)
@@ -865,4 +865,5 @@ with c_table:
         hide_index=True,
         height=350
     )
+
 
