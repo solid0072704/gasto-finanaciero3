@@ -619,9 +619,9 @@ with col_inputs:
     with tabs[1]: render_scenario_inputs("Optimista")
     with tabs[2]: render_scenario_inputs("Pesimista")
 
-# --- DASHBOARD ---
-# LEEMOS DESDE session_state EN LUGAR DE CALCULAR DIRECTAMENTE
-res = st.session_state.calc_results["Real"]
+# --- CALCULO AUTOMÁTICO (REACTIVO) ---
+results = {name: calcular_flujo(st.session_state.data_scenarios[name]) for name in SCENARIOS}
+res = results["Real"]
 
 # Función lambda para formatear miles con punto
 fmt_nums = lambda x: f"{x:,.0f}".replace(",", ".")
@@ -639,7 +639,7 @@ with col_dash:
     st.markdown("#### 💳 Costos Financieros (Total Devengado)")
     with st.container():
         st.markdown('<div class="interest-card">', unsafe_allow_html=True)
-        st.markdown('<div class="interest-title">Desglose de Intereses Proyectados</div>', unsafe_allow_html=True)
+        st.markdown('<div class="interest-title">Desglose de Intereses Proyectados (Devengado)</div>', unsafe_allow_html=True)
         
         det = res["detalles_fin"]
         ic1, ic2, ic3, ic4 = st.columns(4)
@@ -706,7 +706,7 @@ with col_dash:
 
     # --- NUEVA SECCIÓN: ANÁLISIS POR HITOS (ESCENARIO REAL) ---
     st.markdown("---")
-    st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos")
+    st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos (Escenario Real - DEVENGADO)")
     
     # Obtener parámetros del escenario Real
     params_real = st.session_state.data_scenarios["Real"]
@@ -826,7 +826,7 @@ with col_dash:
         st.plotly_chart(fig_c, use_container_width=True)
 
     with c_table:
-        st.subheader("Resumen Escenarios")
+        st.subheader("Resumen Numérico")
         
         # Formateo visual para la tabla
         df_show = df_comp.copy()
@@ -843,24 +843,8 @@ with col_dash:
 
     # --- GRÁFICOS VISUALES AL FINAL ---
     st.markdown("---")
-    st.header("📈 Visualización de Flujos y Deuda (Escenario Real)")
+    st.header("📈 Visualización de Flujo de Caja (Escenario Real)")
     
-    st.markdown("### 🧱 Composición Deuda Total")
-    df = res["df"]
-    
-    fig_stack = go.Figure()
-    fig_stack.add_trace(go.Scatter(
-        x=df["Mes"], y=df["Deuda Banco"], mode='lines', stackgroup='one', name='Banco', line=dict(color='#3B82F6')
-    ))
-    fig_stack.add_trace(go.Scatter(
-        x=df["Mes"], y=df["Deuda KPs"], mode='lines', stackgroup='one', name='KPs', line=dict(color='#A855F7')
-    ))
-    fig_stack.add_trace(go.Scatter(
-        x=df["Mes"], y=df["Deuda Relac."], mode='lines', stackgroup='one', name='Relacionada', line=dict(color='#F97316')
-    ))
-    fig_stack.update_layout(template="plotly_dark", height=300, margin=dict(t=20, b=20, l=20, r=20), font=dict(size=15))
-    st.plotly_chart(fig_stack, use_container_width=True)
-
     st.markdown("### 🌊 Flujo de Caja")
     fig_cash = go.Figure()
     fig_cash.add_trace(go.Bar(
