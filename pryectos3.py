@@ -826,7 +826,7 @@ with col_dash:
         st.plotly_chart(fig_c, use_container_width=True)
 
     with c_table:
-        st.subheader("Resumen Numérico")
+        st.subheader("Resumen Escenarios")
         
         # Formateo visual para la tabla
         df_show = df_comp.copy()
@@ -874,4 +874,5 @@ with col_dash:
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
+
 
