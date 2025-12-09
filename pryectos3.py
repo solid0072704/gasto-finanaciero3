@@ -5,13 +5,22 @@ import plotly.graph_objects as go
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Evaluación Inmobiliaria Pro", layout="wide", page_icon="🏢")
 
+# --- 0. LIMPIEZA DE CACHÉ AUTOMÁTICA (SOLUCIÓN AL ERROR) ---
+# Verifica si la memoria tiene la estructura vieja y la reinicia
+if 'data_scenarios' in st.session_state:
+    try:
+        # Intentamos acceder a la nueva clave. Si falla, limpiamos.
+        test = st.session_state.data_scenarios["Real"]["lista_relacionadas"]
+    except KeyError:
+        st.session_state.clear()
+        st.rerun()
+
 # --- ESTILOS CSS ---
 def local_css():
     st.markdown("""
     <style>
         .stApp { background-color: #0E1117 !important; }
         
-        /* FUENTES MÁS GRANDES (+3 aprox) */
         h1, h2, h3, h4, h5, h6, .stMarkdown, p, label, span, div { 
             color: #FAFAFA !important; 
             font-family: 'Segoe UI', sans-serif;
@@ -44,10 +53,8 @@ def local_css():
         }
         
         div[data-testid="stDataFrame"] { width: 100%; font-size: 18px !important; }
-        
         div[data-testid="stMetricValue"] { font-size: 34px !important; }
         div[data-testid="stMetricLabel"] { font-size: 18px !important; }
-
         .small-btn { margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
@@ -154,6 +161,7 @@ def calcular_flujo(data):
     
     # --- INICIALIZACIÓN DEUDA RELACIONADA (LISTA) ---
     rel_activos = []
+    # Usamos .get con lista vacía por defecto para evitar errores
     for rel in data.get("lista_relacionadas", []):
         mes_ini_rel = int(rel.get("mes_inicio", 1))
         saldo_inicial_rel = rel["monto"] if mes_ini_rel == 0 else 0.0
@@ -199,22 +207,14 @@ def calcular_flujo(data):
     equity_terreno = v_terr * (1 - pct_fin_terr)
     inversion_inicial = equity_terreno + v_otros_inicial
     
-    # Calculamos ingresos por deuda SOLAMENTE si mes_inicio == 0
+    # Ingresos deuda Mes 0
     ingreso_deuda_mes_0 = 0.0
-    
-    # Sumar KPs mes 0
     for kp in kps_activos:
-        if kp["mes_inicio"] == 0:
-            ingreso_deuda_mes_0 += kp["monto_total"]
-            
-    # Sumar Relacionada mes 0
+        if kp["mes_inicio"] == 0: ingreso_deuda_mes_0 += kp["monto_total"]
     for rel in rel_activos:
-        if rel["mes_inicio"] == 0:
-            ingreso_deuda_mes_0 += rel["monto_total"]
+        if rel["mes_inicio"] == 0: ingreso_deuda_mes_0 += rel["monto_total"]
             
-    # El flujo neto se beneficia si entra deuda en el mes 0
     flujo_neto_ini = -inversion_inicial + ingreso_deuda_mes_0
-
     saldo_total_rel = sum(r['saldo'] for r in rel_activos)
     saldo_total_kps = sum(k['saldo'] for k in kps_activos)
 
@@ -247,16 +247,12 @@ def calcular_flujo(data):
     for m in range(1, horizonte + 1):
         factor_uf *= (1 + inflacion_mensual)
         
-        # 0. VERIFICAR TOMA DE DEUDA EN ESTE MES (KP / RELACIONADA)
+        # 0. VERIFICAR TOMA DE DEUDA EN ESTE MES
         ingreso_deuda_este_mes = 0.0
-        
-        # A. Relacionada (Múltiples)
         for rel in rel_activos:
             if m == rel["mes_inicio"]:
                 rel["saldo"] += rel["monto_total"]
                 ingreso_deuda_este_mes += rel["monto_total"]
-            
-        # B. KPs (Múltiples)
         for kp in kps_activos:
             if m == kp["mes_inicio"]:
                 kp["saldo"] += kp["monto_total"]
