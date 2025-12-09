@@ -175,9 +175,9 @@ def calcular_flujo(data):
         "Deuda Total": (saldo_const_uf + saldo_terr_uf) + (saldo_const_clp_nominal + saldo_terr_clp_nominal) + saldo_relacionada + sum(k['saldo'] for k in kps_activos),
         "Ingresos": 0.0,
         "Otros Costos (Op)": 0.0,
-        "Int. Banco": 0.0, # NUEVO: Desglose
-        "Int. KPs": 0.0,   # NUEVO: Desglose
-        "Int. Relac.": 0.0,# NUEVO: Desglose
+        "Int. Banco": 0.0,
+        "Int. KPs": 0.0,
+        "Int. Relac.": 0.0,
         "Pago Intereses Total": 0.0,
         "Pago Capital": 0.0,
         "Inversión (Equity)": inversion_inicial,
@@ -399,12 +399,10 @@ def calcular_flujo(data):
             "Otros Costos (Op)": gasto_operativo_mes,
             "Inversión (Equity)": egreso_equity_const,
             
-            # --- NUEVO: GUARDAMOS EL DESGLOSE ---
             "Int. Banco": pago_banco_interes,
             "Int. KPs": pago_kps_interes,
             "Int. Relac.": pago_rel_interes,
             "Pago Intereses Total": total_pagado_intereses,
-            # ------------------------------------
             
             "Pago Capital": total_pagado_capital,
             "Flujo Neto": flujo_neto_mes,
@@ -657,15 +655,61 @@ with col_dash:
                 "Mes": st.column_config.TextColumn("Mes"),
                 "Ingresos": st.column_config.TextColumn("Ingresos"),
                 "Otros Costos (Op)": st.column_config.TextColumn("Otros Costos"),
-                
-                # Nuevas columnas
                 "Int. Banco": st.column_config.TextColumn("Int. Banco"),
                 "Int. KPs": st.column_config.TextColumn("Int. KPs"),
                 "Int. Relac.": st.column_config.TextColumn("Int. Relac."),
-                
                 "Pago Capital": st.column_config.TextColumn("Capital"),
                 "Flujo Neto": st.column_config.TextColumn("Flujo Neto"),
                 "Flujo Acumulado": st.column_config.TextColumn("Acumulado"),
                 "Deuda Total": st.column_config.TextColumn("Deuda Viva"),
             }
         )
+
+# --- SECCIÓN COMPARATIVA (AL FINAL) ---
+st.markdown("---")
+st.header("⚖️ Comparativa de Escenarios")
+
+# 1. Preparar Datos para Comparar
+comp_data = []
+for sc in SCENARIOS:
+    # Check if result exists
+    if sc in st.session_state.calc_results:
+        r = st.session_state.calc_results[sc]
+        comp_data.append({
+            "Escenario": sc,
+            "Int. Banco (UF)": r["detalles_fin"]["banco"],
+            "Int. KPs (UF)": r["detalles_fin"]["kps"],
+            "Int. Relac. (UF)": r["detalles_fin"]["relacionada"],
+            "Total Intereses (UF)": r["costo_financiero_total"],
+            "Mes Break Even": r["break_even"] if r["break_even"] is not None else "N/A"
+        })
+
+df_comp = pd.DataFrame(comp_data)
+
+# 2. Layout Visual
+c_chart, c_table = st.columns([1.5, 1])
+
+with c_chart:
+    st.subheader("Costos Financieros por Escenario")
+    fig_c = go.Figure()
+    fig_c.add_trace(go.Bar(name='Banco', x=df_comp['Escenario'], y=df_comp['Int. Banco (UF)'], marker_color='#3B82F6'))
+    fig_c.add_trace(go.Bar(name='KPs', x=df_comp['Escenario'], y=df_comp['Int. KPs (UF)'], marker_color='#A855F7'))
+    fig_c.add_trace(go.Bar(name='Relacionada', x=df_comp['Escenario'], y=df_comp['Int. Relac. (UF)'], marker_color='#F97316'))
+    fig_c.update_layout(barmode='group', template="plotly_dark", height=350, legend_title="Tipo Interés")
+    st.plotly_chart(fig_c, use_container_width=True)
+
+with c_table:
+    st.subheader("Resumen Numérico")
+    
+    # Formateo visual para la tabla
+    df_show = df_comp.copy()
+    cols_num = ["Int. Banco (UF)", "Int. KPs (UF)", "Int. Relac. (UF)", "Total Intereses (UF)"]
+    for col in cols_num:
+        df_show[col] = df_show[col].apply(lambda x: f"{x:,.0f}".replace(",", "."))
+    
+    st.dataframe(
+        df_show, 
+        use_container_width=True, 
+        hide_index=True,
+        height=350
+    )
