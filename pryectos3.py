@@ -5,12 +5,14 @@ import plotly.graph_objects as go
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Evaluación Inmobiliaria Pro", layout="wide", page_icon="🏢")
 
-# --- 0. LIMPIEZA DE CACHÉ AUTOMÁTICA (SOLUCIÓN AL ERROR) ---
-# Verifica si la memoria tiene la estructura vieja y la reinicia
+# --- 0. LIMPIEZA DE CACHÉ AUTOMÁTICA (MIGRACIÓN ESTRUCTURA) ---
+# Verifica si la memoria tiene la estructura vieja o falta el nuevo campo y la reinicia
 if 'data_scenarios' in st.session_state:
     try:
-        # Intentamos acceder a la nueva clave. Si falla, limpiamos.
-        test = st.session_state.data_scenarios["Real"]["lista_relacionadas"]
+        # Intentamos acceder a la clave nueva en el escenario Real
+        test_key = st.session_state.data_scenarios["Real"].get("mes_inicio_obra")
+        if test_key is None: # Si existe la estructura pero no el campo nuevo
+            raise KeyError
     except KeyError:
         st.session_state.clear()
         st.rerun()
@@ -88,8 +90,12 @@ def get_default_config(type_scen):
         "pct_fin_terreno": 60,
         "valor_contrato": constr,
         "pct_fin_construccion": 80,
+        
+        # GANTT / CRONOGRAMA
         "duracion_obra": 18,
+        "mes_inicio_obra": 1, # NUEVO: Mes de la Gantt donde inicia obra
         "mes_recepcion": 22,
+        
         "saldo_inicial_uf": 0.0,
         
         # OTROS COSTOS
@@ -98,9 +104,9 @@ def get_default_config(type_scen):
         
         # Deuda Bancaria
         "rango_pago_terreno": [1, 60], 
-        "prioridad_terreno": False,     
+        "prioridad_terreno": False,      
         "tasa_anual_uf": tasa_uf,
-        "pct_deuda_pesos": 0,     
+        "pct_deuda_pesos": 0,      
         "tasa_anual_clp": tasa_clp, 
         "inflacion_anual": inflacion,
         "pagar_intereses_construccion": False,
@@ -122,7 +128,7 @@ def get_default_config(type_scen):
 if 'data_scenarios' not in st.session_state:
     st.session_state.data_scenarios = {k: get_default_config(k) for k in SCENARIOS}
 
-# --- 2. MOTOR DE CÁLCULO ---
+# --- 2. MOTOR DE CÁLCULO (ACTUALIZADO LÓGICA GANTT) ---
 def calcular_flujo(data):
     # Variables Generales
     v_terr = data["valor_terreno"]
@@ -132,8 +138,14 @@ def calcular_flujo(data):
     v_otros_inicial = data.get("total_otros_costos_inicial", 0.0)
     v_otros_mensual = data.get("otros_costos_mensuales", 0.0)
     
+    # Cronograma (Gantt)
     duracion = int(data["duracion_obra"])
+    inicio_obra = int(data.get("mes_inicio_obra", 1)) # Default 1 si no existe
     recepcion = int(data["mes_recepcion"])
+    
+    # Calculamos término de obra
+    fin_obra = inicio_obra + duracion - 1
+    
     saldo_inicial = data.get("saldo_inicial_uf", 0)
     
     # Config Deudas
@@ -161,7 +173,6 @@ def calcular_flujo(data):
     
     # --- INICIALIZACIÓN DEUDA RELACIONADA (LISTA) ---
     rel_activos = []
-    # Usamos .get con lista vacía por defecto para evitar errores
     for rel in data.get("lista_relacionadas", []):
         mes_ini_rel = int(rel.get("mes_inicio", 1))
         saldo_inicial_rel = rel["monto"] if mes_ini_rel == 0 else 0.0
@@ -197,9 +208,11 @@ def calcular_flujo(data):
     for p in data["plan_ventas"]:
         recuperos.append({"Mes": int(p["mes"]), "Monto": data["valor_venta_total"] * (p["pct"]/100)})
     
+    # Definición de Horizonte (asegurar que cubra obra y ventas)
     horizonte = recepcion + 12
     if recuperos:
         horizonte = max(horizonte, max([r["Mes"] for r in recuperos]) + 6)
+    horizonte = max(horizonte, fin_obra + 6) # Asegurar cobertura de obra tardía
         
     flujo = []
     
@@ -247,7 +260,7 @@ def calcular_flujo(data):
     for m in range(1, horizonte + 1):
         factor_uf *= (1 + inflacion_mensual)
         
-        # 0. VERIFICAR TOMA DE DEUDA EN ESTE MES
+        # 0. VERIFICAR TOMA DE DEUDA EN ESTE MES (Privada)
         ingreso_deuda_este_mes = 0.0
         for rel in rel_activos:
             if m == rel["mes_inicio"]:
@@ -258,9 +271,11 @@ def calcular_flujo(data):
                 kp["saldo"] += kp["monto_total"]
                 ingreso_deuda_este_mes += kp["monto_total"]
         
-        # 1. GENERACIÓN DE DEUDA BANCARIA (GIROS)
+        # 1. GENERACIÓN DE DEUDA BANCARIA (GIROS) - LOGICA GANTT ACTUALIZADA
         egreso_equity_const = 0
-        if m <= duracion:
+        
+        # Solo generamos costo y giro si estamos DENTRO del periodo de obra
+        if m >= inicio_obra and m <= fin_obra:
             costo_mes_total = v_cont / duracion
             giro_banco = costo_mes_total * pct_fin_const
             egreso_equity_const = costo_mes_total - giro_banco 
@@ -496,7 +511,7 @@ def calcular_flujo(data):
             "Deuda Relac.": saldo_rel_reporte,
             "Deuda Total": deuda_banco_reporte + saldo_kps_reporte + saldo_rel_reporte,
             "Ingresos": ingreso_uf,
-            "Ingresos Deuda": ingreso_deuda_este_mes, # Valor visual
+            "Ingresos Deuda": ingreso_deuda_este_mes, 
             "Otros Costos (Op)": gasto_operativo_mes,
             "Inversión (Equity)": egreso_equity_const,
             
@@ -576,9 +591,10 @@ with col_inputs:
                 data["valor_contrato"] = st.number_input("Costo Const. (UF)", value=data["valor_contrato"], key=f"{scen_key}_vc")
                 data["pct_fin_construccion"] = st.slider("% Fin. Construcción", 0, 100, data["pct_fin_construccion"], key=f"{scen_key}_fin_c")
                 
-                # --- NUEVA OPCIÓN: MES DE RECEPCIÓN FINAL ---
-                c_obra, c_recep = st.columns(2)
+                # --- NUEVA OPCIÓN: MES DE RECEPCIÓN FINAL Y GANTT ---
+                c_obra, c_ini, c_recep = st.columns(3)
                 data["duracion_obra"] = c_obra.number_input("Meses Obra", value=data["duracion_obra"], key=f"{scen_key}_dur")
+                data["mes_inicio_obra"] = c_ini.number_input("Mes Inicio Obra (Gantt)", value=data.get("mes_inicio_obra", 1), key=f"{scen_key}_ini_obra")
                 data["mes_recepcion"] = c_recep.number_input("Mes Recepción Final", value=data["mes_recepcion"], key=f"{scen_key}_recep")
                 
                 data["saldo_inicial_uf"] = st.number_input("Saldo Inicial Banco (UF)", value=data.get("saldo_inicial_uf", 0.0), key=f"{scen_key}_ini")
@@ -731,7 +747,7 @@ with col_dash:
         total_row = {
             "Mes": "TOTAL",
             "Ingresos": df_display["Ingresos"].sum(),
-            "Ingresos Deuda": df_display["Ingresos Deuda"].sum(), # NUEVO TOTAL
+            "Ingresos Deuda": df_display["Ingresos Deuda"].sum(), 
             "Otros Costos (Op)": df_display["Otros Costos (Op)"].sum(),
             
             # Sumamos las columnas desglosadas (Pagado)
@@ -762,11 +778,11 @@ with col_dash:
             column_config={
                 "Mes": st.column_config.TextColumn("Mes"),
                 "Ingresos": st.column_config.TextColumn("Ingresos"),
-                "Ingresos Deuda": st.column_config.TextColumn("Ingresos Deuda"), # NUEVA COLUMNA VISUAL
+                "Ingresos Deuda": st.column_config.TextColumn("Ingresos Deuda"), 
                 "Otros Costos (Op)": st.column_config.TextColumn("Otros Costos"),
                 "Int. Banco": st.column_config.TextColumn("Int. Banco (Pagado)"),
                 "Int. KPs": st.column_config.TextColumn("Int. KPs (Pagado)"),
-                "Int. Relac.": st.column_config.TextColumn("Int. Relac. (Pagado)"),
+                "Int. Relac": st.column_config.TextColumn("Int. Relac. (Pagado)"),
                 "Pago Capital": st.column_config.TextColumn("Capital"),
                 "Flujo Neto": st.column_config.TextColumn("Flujo Neto"),
                 "Flujo Acumulado": st.column_config.TextColumn("Acumulado"),
@@ -780,16 +796,18 @@ with col_dash:
     
     # Obtener parámetros del escenario Real
     params_real = st.session_state.data_scenarios["Real"]
-    mes_construccion = int(params_real["duracion_obra"])
+    
+    # LOGICA GANTT EN HITOS
+    mes_inicio_obra = int(params_real.get("mes_inicio_obra", 1))
+    duracion_obra = int(params_real["duracion_obra"])
+    mes_construccion = mes_inicio_obra + duracion_obra - 1 # Mes Término
     mes_recepcion = int(params_real["mes_recepcion"])
     
-    # Encontrar el último mes con ventas (ingresos > 0)
-    # Buscamos en el DataFrame original 'df' el último índice donde 'Ingresos' > 0
     df_real = res["df"]
     try:
         mes_ultimo_recupero = df_real[df_real["Ingresos"] > 0].iloc[-1]["Mes"]
     except IndexError:
-        mes_ultimo_recupero = mes_recepcion # Fallback por si no hay ventas
+        mes_ultimo_recupero = mes_recepcion 
         
     mes_ultimo_recupero = int(mes_ultimo_recupero)
     
@@ -806,8 +824,6 @@ with col_dash:
         # Filtramos hasta el mes del hito (acumulado)
         df_cut = df_real[df_real["Mes"] <= ms["mes"]]
         
-        # IMPORTANTE: Usamos LAS NUEVAS COLUMNAS "Devengado" para este análisis
-        # Estas columnas guardan lo que se generó, independientemente de si se pagó.
         acum_banco = df_cut["Devengado Banco"].sum()
         acum_kps = df_cut["Devengado KPs"].sum()
         acum_relac = df_cut["Devengado Relac."].sum() 
@@ -862,8 +878,8 @@ with col_dash:
             x=df_comp['Escenario'], 
             y=df_comp['Int. Banco (Dev.)'], 
             marker_color='#3B82F6',
-            text=df_comp['Int. Banco (Dev.)'].apply(fmt_nums), # <--- Texto con el valor
-            textposition='auto' # <--- Posición automática
+            text=df_comp['Int. Banco (Dev.)'].apply(fmt_nums), 
+            textposition='auto' 
         ))
         
         # Barra KPs
@@ -872,7 +888,7 @@ with col_dash:
             x=df_comp['Escenario'], 
             y=df_comp['Int. KPs (Dev.)'], 
             marker_color='#A855F7',
-            text=df_comp['Int. KPs (Dev.)'].apply(fmt_nums), # <--- Texto con el valor
+            text=df_comp['Int. KPs (Dev.)'].apply(fmt_nums), 
             textposition='auto'
         ))
         
@@ -882,7 +898,7 @@ with col_dash:
             x=df_comp['Escenario'], 
             y=df_comp['Int. Relac. (Dev.)'], 
             marker_color='#F97316',
-            text=df_comp['Int. Relac. (Dev.)'].apply(fmt_nums), # <--- Texto con el valor
+            text=df_comp['Int. Relac. (Dev.)'].apply(fmt_nums), 
             textposition='auto'
         ))
         
@@ -890,8 +906,8 @@ with col_dash:
             barmode='group', 
             template="plotly_dark", 
             height=350, 
-            legend_title="Tipo Interés", 
-            font=dict(size=15) # Mantenemos la fuente grande
+            legend_title="Tipo Interés",
+            font=dict(size=15) 
         )
         st.plotly_chart(fig_c, use_container_width=True)
 
@@ -915,7 +931,6 @@ with col_dash:
     st.markdown("---")
     st.header("📈 Visualización de Flujo de Caja (Escenario Real)")
     
-    # IMPORTANTE: Definimos 'df' aquí para que el gráfico final funcione correctamente
     df = res["df"]
 
     st.markdown("### 🌊 Flujo de Caja")
@@ -931,3 +946,4 @@ with col_dash:
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
+
