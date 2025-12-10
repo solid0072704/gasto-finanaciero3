@@ -5,13 +5,11 @@ import plotly.graph_objects as go
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Evaluación Inmobiliaria Pro", layout="wide", page_icon="🏢")
 
-# --- 0. LIMPIEZA DE CACHÉ AUTOMÁTICA (MIGRACIÓN ESTRUCTURA) ---
-# Verifica si la memoria tiene la estructura vieja o falta el nuevo campo y la reinicia
+# --- 0. LIMPIEZA DE CACHÉ AUTOMÁTICA ---
 if 'data_scenarios' in st.session_state:
     try:
-        # Intentamos acceder a la clave nueva en el escenario Real
         test_key = st.session_state.data_scenarios["Real"].get("mes_inicio_obra")
-        if test_key is None: # Si existe la estructura pero no el campo nuevo
+        if test_key is None: 
             raise KeyError
     except KeyError:
         st.session_state.clear()
@@ -22,22 +20,18 @@ def local_css():
     st.markdown("""
     <style>
         .stApp { background-color: #0E1117 !important; }
-        
         h1, h2, h3, h4, h5, h6, .stMarkdown, p, label, span, div { 
             color: #FAFAFA !important; 
             font-family: 'Segoe UI', sans-serif;
             font-size: 18px !important; 
         }
-        
         div[data-baseweb="input"] { 
             background-color: #262730 !important; 
             color: white !important; 
             border: 1px solid #4B5563; 
             font-size: 18px !important;
         }
-        
         div.stVerticalBlock, div[data-testid="stExpander"] { background-color: #1F2937; border-radius: 12px; border: 1px solid #374151; }
-        
         .interest-card {
             background-color: #1F2937;
             padding: 20px;
@@ -53,7 +47,6 @@ def local_css():
             letter-spacing: 0.05em;
             margin-bottom: 15px;
         }
-        
         div[data-testid="stDataFrame"] { width: 100%; font-size: 18px !important; }
         div[data-testid="stMetricValue"] { font-size: 34px !important; }
         div[data-testid="stMetricLabel"] { font-size: 18px !important; }
@@ -69,12 +62,10 @@ SCENARIOS = ["Real", "Optimista", "Pesimista"]
 if 'menu_expanded' not in st.session_state:
     st.session_state.menu_expanded = False
 
-# Token para forzar el redibujado de los expanders
 if 'exp_reset_token' not in st.session_state:
     st.session_state.exp_reset_token = 0
 
 def get_default_config(type_scen):
-    # Valores base
     if type_scen == "Optimista":
         venta, tasa_uf, constr = 155000, 5.5, 68000
         inflacion, tasa_clp = 3.0, 9.0
@@ -89,24 +80,20 @@ def get_default_config(type_scen):
         otros_costos_ini = 3000.0
         
     return {
-        # Proyecto Base
         "valor_terreno": 30000,
         "pct_fin_terreno": 60,
         "valor_contrato": constr,
         "pct_fin_construccion": 80,
-        
-        # GANTT / CRONOGRAMA
         "duracion_obra": 18,
-        "mes_inicio_obra": 1, # NUEVO: Mes de la Gantt donde inicia obra
+        "mes_inicio_obra": 1, 
         "mes_recepcion": 22,
         
-        "saldo_inicial_uf": 0.0,
+        "saldo_inicial_uf": 0.0, # Deuda Viva
+        "intereses_previos_uf": 0.0, # Sunk Cost
         
-        # OTROS COSTOS
         "total_otros_costos_inicial": otros_costos_ini,
         "otros_costos_mensuales": 100.0,
         
-        # Deuda Bancaria
         "rango_pago_terreno": [1, 60], 
         "prioridad_terreno": False,      
         "tasa_anual_uf": tasa_uf,
@@ -115,7 +102,6 @@ def get_default_config(type_scen):
         "inflacion_anual": inflacion,
         "pagar_intereses_construccion": False,
 
-        # Deuda Privada (LISTAS)
         "lista_relacionadas": [
              {"nombre": "Relac. 1", "monto": 5000.0, "tasa_anual": 8.0, "frecuencia_pago": "Al Final", "mes_inicio": 1}
         ],
@@ -132,7 +118,7 @@ def get_default_config(type_scen):
 if 'data_scenarios' not in st.session_state:
     st.session_state.data_scenarios = {k: get_default_config(k) for k in SCENARIOS}
 
-# --- 2. MOTOR DE CÁLCULO (ACTUALIZADO LÓGICA GANTT) ---
+# --- 2. MOTOR DE CÁLCULO ---
 def calcular_flujo(data):
     # Variables Generales
     v_terr = data["valor_terreno"]
@@ -142,12 +128,10 @@ def calcular_flujo(data):
     v_otros_inicial = data.get("total_otros_costos_inicial", 0.0)
     v_otros_mensual = data.get("otros_costos_mensuales", 0.0)
     
-    # Cronograma (Gantt)
+    # Cronograma
     duracion = int(data["duracion_obra"])
-    inicio_obra = int(data.get("mes_inicio_obra", 1)) # Default 1 si no existe
+    inicio_obra = int(data.get("mes_inicio_obra", 1)) 
     recepcion = int(data["mes_recepcion"])
-    
-    # Calculamos término de obra
     fin_obra = inicio_obra + duracion - 1
     
     saldo_inicial = data.get("saldo_inicial_uf", 0)
@@ -175,56 +159,46 @@ def calcular_flujo(data):
     saldo_const_uf = saldo_inicial * pct_uf
     saldo_const_clp_nominal = saldo_inicial * pct_clp 
     
-    # --- INICIALIZACIÓN DEUDA RELACIONADA (LISTA) ---
+    # --- INICIALIZACIÓN DEUDA PRIVADA ---
     rel_activos = []
     for rel in data.get("lista_relacionadas", []):
         mes_ini_rel = int(rel.get("mes_inicio", 1))
         saldo_inicial_rel = rel["monto"] if mes_ini_rel == 0 else 0.0
-        
         rel_activos.append({
-            "monto_total": rel["monto"],
-            "mes_inicio": mes_ini_rel,
-            "saldo": saldo_inicial_rel,
-            "tasa_mensual": (rel["tasa_anual"] / 100) / 12,
-            "frecuencia": rel.get("frecuencia_pago", "Al Final"),
-            "acumulado_trimestre": 0
+            "monto_total": rel["monto"], "mes_inicio": mes_ini_rel, "saldo": saldo_inicial_rel,
+            "tasa_mensual": (rel["tasa_anual"] / 100) / 12, "frecuencia": rel.get("frecuencia_pago", "Al Final"), "acumulado_trimestre": 0
         })
 
-    # --- INICIALIZACIÓN DEUDA KPs (LISTA) ---
     kps_activos = []
     for kp in data.get("lista_kps", []):
         mes_ini_kp = int(kp.get("mes_inicio", 1))
         saldo_inicial_kp = kp["monto"] if mes_ini_kp == 0 else 0.0
-        
         kps_activos.append({
-            "monto_total": kp["monto"],
-            "mes_inicio": mes_ini_kp,
-            "saldo": saldo_inicial_kp,
-            "tasa_mensual": (kp["tasa_anual"] / 100) / 12,
-            "plazo": kp["plazo"],
-            "frecuencia": kp.get("frecuencia_pago", "Mensual"), 
-            "acumulado_trimestre": 0, 
-            "interes_acumulado_hist": 0
+            "monto_total": kp["monto"], "mes_inicio": mes_ini_kp, "saldo": saldo_inicial_kp,
+            "tasa_mensual": (kp["tasa_anual"] / 100) / 12, "plazo": kp["plazo"],
+            "frecuencia": kp.get("frecuencia_pago", "Mensual"), "acumulado_trimestre": 0, "interes_acumulado_hist": 0
         })
 
-    # Recuperos (Ventas)
+    # Recuperos y Horizonte
     recuperos = []
+    meses_con_venta = []
     for p in data["plan_ventas"]:
         recuperos.append({"Mes": int(p["mes"]), "Monto": data["valor_venta_total"] * (p["pct"]/100)})
+        if p["pct"] > 0: meses_con_venta.append(int(p["mes"]))
     
-    # Definición de Horizonte (asegurar que cubra obra y ventas)
+    # IDENTIFICAR EL ÚLTIMO MES DE VENTA (PARA FORZAR PAGO)
+    ultimo_mes_venta = max(meses_con_venta) if meses_con_venta else -1
+    
     horizonte = recepcion + 12
     if recuperos:
         horizonte = max(horizonte, max([r["Mes"] for r in recuperos]) + 6)
-    horizonte = max(horizonte, fin_obra + 6) # Asegurar cobertura de obra tardía
+    horizonte = max(horizonte, fin_obra + 6)
         
     flujo = []
     
-    # --- MES 0: EQUITY INICIAL ---
+    # --- MES 0 ---
     equity_terreno = v_terr * (1 - pct_fin_terr)
     inversion_inicial = equity_terreno + v_otros_inicial
-    
-    # Ingresos deuda Mes 0
     ingreso_deuda_mes_0 = 0.0
     for kp in kps_activos:
         if kp["mes_inicio"] == 0: ingreso_deuda_mes_0 += kp["monto_total"]
@@ -238,19 +212,13 @@ def calcular_flujo(data):
     flujo.append({
         "Mes": 0,
         "Deuda Total": (saldo_const_uf + saldo_terr_uf) + (saldo_const_clp_nominal + saldo_terr_clp_nominal) + saldo_total_rel + saldo_total_kps,
-        "Ingresos": 0.0,
-        "Ingresos Deuda": ingreso_deuda_mes_0,
-        "Otros Costos (Op)": 0.0,
+        "Ingresos": 0.0, "Ingresos Deuda": ingreso_deuda_mes_0, "Otros Costos (Op)": 0.0,
         "Int. Banco": 0.0, "Int. KPs": 0.0, "Int. Relac.": 0.0,
         "Devengado Banco": 0.0, "Devengado KPs": 0.0, "Devengado Relac.": 0.0,
-        "Pago Intereses Total": 0.0,
-        "Pago Capital": 0.0,
-        "Inversión (Equity)": inversion_inicial,
-        "Flujo Neto": flujo_neto_ini,
-        "Flujo Acumulado": flujo_neto_ini
+        "Pago Intereses Total": 0.0, "Pago Capital": 0.0,
+        "Inversión (Equity)": inversion_inicial, "Flujo Neto": flujo_neto_ini, "Flujo Acumulado": flujo_neto_ini
     })
     
-    # Acumuladores KPI
     interes_acum_banco_total = 0 
     interes_acum_kps = 0
     interes_acum_relacionada = 0
@@ -264,7 +232,7 @@ def calcular_flujo(data):
     for m in range(1, horizonte + 1):
         factor_uf *= (1 + inflacion_mensual)
         
-        # 0. VERIFICAR TOMA DE DEUDA EN ESTE MES (Privada)
+        # 0. DEUDA PRIVADA ENTRADA
         ingreso_deuda_este_mes = 0.0
         for rel in rel_activos:
             if m == rel["mes_inicio"]:
@@ -275,41 +243,33 @@ def calcular_flujo(data):
                 kp["saldo"] += kp["monto_total"]
                 ingreso_deuda_este_mes += kp["monto_total"]
         
-        # 1. GENERACIÓN DE DEUDA BANCARIA (GIROS) - LOGICA GANTT ACTUALIZADA
+        # 1. GENERACIÓN DE DEUDA BANCARIA (GIROS)
         egreso_equity_const = 0
-        
-        # Solo generamos costo y giro si estamos DENTRO del periodo de obra
         if m >= inicio_obra and m <= fin_obra:
             costo_mes_total = v_cont / duracion
             giro_banco = costo_mes_total * pct_fin_const
             egreso_equity_const = costo_mes_total - giro_banco 
-            
             saldo_const_uf += giro_banco * pct_uf
             saldo_const_clp_nominal += (giro_banco * pct_clp) * factor_uf 
 
-        # 2. CÁLCULO DE INTERESES DEL MES (DEVENGADOS SOBRE SALDO VIGENTE)
-        
+        # 2. INTERESES DEVENGADOS
         # A. Banco
         int_uf_mes = (saldo_const_uf + saldo_terr_uf) * tasa_mensual_uf
         if m == 1: saldo_terr_clp_nominal *= 1.0 
         int_clp_nom_mes = (saldo_const_clp_nominal + saldo_terr_clp_nominal) * tasa_mensual_clp
         int_banco_mes_en_uf = int_uf_mes + (int_clp_nom_mes / factor_uf)
-        
         saldo_const_uf += int_uf_mes
         saldo_const_clp_nominal += int_clp_nom_mes
         interes_acum_banco_total += int_banco_mes_en_uf
 
-        # B. KPs (Interés sobre saldo actual)
+        # B. KPs
         int_kps_generado_mes = 0 
         total_interes_kp_exigible_hoy = 0 
-        
         for kp in kps_activos:
             if kp["saldo"] > 0:
                 ik = kp["saldo"] * kp["tasa_mensual"]
                 kp["interes_acumulado_hist"] += ik
                 int_kps_generado_mes += ik
-                
-                # Gestión Frecuencia KP
                 interes_exigible_este_kp = 0
                 if kp["frecuencia"] == "Mensual":
                     kp["saldo"] += ik
@@ -322,21 +282,16 @@ def calcular_flujo(data):
                         kp["acumulado_trimestre"] = 0 
                 elif kp["frecuencia"] == "Al Final":
                     kp["saldo"] += ik
-                
                 total_interes_kp_exigible_hoy += interes_exigible_este_kp
-
         interes_acum_kps += int_kps_generado_mes
         
-        # C. Relacionada (Múltiples - Interés sobre saldo actual)
+        # C. Relacionada
         int_rel_mes = 0
         total_interes_rel_exigible_hoy = 0
-        
         for rel in rel_activos:
             if rel["saldo"] > 0:
                 ir = rel["saldo"] * rel["tasa_mensual"]
                 int_rel_mes += ir
-                
-                # Gestión Frecuencia Relacionada
                 interes_exigible_este_rel = 0
                 if rel["frecuencia"] == "Mensual":
                     rel["saldo"] += ir
@@ -347,14 +302,12 @@ def calcular_flujo(data):
                     if m % 3 == 0:
                         interes_exigible_este_rel = rel["acumulado_trimestre"]
                         rel["acumulado_trimestre"] = 0
-                else: # Al Final
+                else: 
                     rel["saldo"] += ir
-                
                 total_interes_rel_exigible_hoy += interes_exigible_este_rel
-        
         interes_acum_relacionada += int_rel_mes
         
-        # 3. FLUJO OPERATIVO (INCLUYE INGRESO DEUDA)
+        # 3. FLUJO OPERATIVO
         ingreso_uf = sum([r["Monto"] for r in recuperos if r["Mes"] == m])
         gasto_operativo_mes = v_otros_mensual if (m <= recepcion + 6) else 0 
         total_otros_costos_operativos += gasto_operativo_mes
@@ -363,16 +316,16 @@ def calcular_flujo(data):
         dinero_para_deuda = max(0.0, flujo_operativo)
         
         # --- LÓGICA DE PAGO OBLIGATORIO DE INTERESES (EQUITY) ---
-        aporte_equity_interes = 0.0
-        
         if pagar_int_const:
             if dinero_para_deuda < int_banco_mes_en_uf:
                 deficit = int_banco_mes_en_uf - dinero_para_deuda
-                aporte_equity_interes = deficit
                 dinero_para_deuda += deficit 
                 egreso_equity_const += deficit 
         
-        # 4. WATERFALL DE PAGOS
+        # 4. WATERFALL DE PAGOS (CON LOGICA DE CIERRE FORZADO)
+        
+        # --- CHECK DE CIERRE: ¿ES EL ÚLTIMO MES DE VENTAS? ---
+        es_mes_cierre = (m == ultimo_mes_venta)
         
         # --- A. BANCO ---
         real_const_uf = saldo_const_uf + (saldo_const_clp_nominal / factor_uf)
@@ -383,113 +336,142 @@ def calcular_flujo(data):
         pago_banco_interes = 0
         pago_banco_capital = 0
 
-        if dinero_para_deuda > 0 and deuda_banco_total > 0:
-            monto_a_pagar_banco = min(deuda_banco_total, dinero_para_deuda)
-            pago_banco_interes = min(monto_a_pagar_banco, int_banco_mes_en_uf)
-            
-            if pagar_int_const and pago_banco_interes < int_banco_mes_en_uf and monto_a_pagar_banco >= int_banco_mes_en_uf:
-                pago_banco_interes = int_banco_mes_en_uf
-
-            pago_banco_capital = monto_a_pagar_banco - pago_banco_interes
-            
-            es_rango_terreno = (m >= inicio_pago_t and m <= fin_pago_t)
-            p_terr, p_const = 0, 0
-            
-            if es_rango_terreno:
-                if prioridad_t:
-                    p_terr = min(real_terr_uf, monto_a_pagar_banco)
-                    p_const = min(real_const_uf, monto_a_pagar_banco - p_terr)
-                else:
-                     if deuda_banco_total > 0:
-                        p_terr = monto_a_pagar_banco * (real_terr_uf / deuda_banco_total)
-                        p_const = monto_a_pagar_banco * (real_const_uf / deuda_banco_total)
+        if deuda_banco_total > 0:
+            # SI ES MES DE CIERRE, PAGAMOS TODO AUNQUE NO HAYA CAJA (EQUITY)
+            if es_mes_cierre:
+                monto_a_pagar_banco = deuda_banco_total
             else:
-                p_const = min(real_const_uf, monto_a_pagar_banco)
+                monto_a_pagar_banco = min(deuda_banco_total, dinero_para_deuda) if dinero_para_deuda > 0 else 0
             
-            if p_terr > 0 and real_terr_uf > 0:
-                prop = p_terr / real_terr_uf
-                saldo_terr_uf -= (saldo_terr_uf * prop)
-                saldo_terr_clp_nominal -= (saldo_terr_clp_nominal * prop)
+            if monto_a_pagar_banco > 0:
+                pago_banco_interes = min(monto_a_pagar_banco, int_banco_mes_en_uf)
+                
+                if pagar_int_const and pago_banco_interes < int_banco_mes_en_uf and monto_a_pagar_banco >= int_banco_mes_en_uf:
+                    pago_banco_interes = int_banco_mes_en_uf
 
-            if p_const > 0 and real_const_uf > 0:
-                prop = p_const / real_const_uf
-                saldo_const_uf -= (saldo_const_uf * prop)
-                saldo_const_clp_nominal -= (saldo_const_clp_nominal * prop)
-            
-            pago_banco_total = monto_a_pagar_banco
-            dinero_para_deuda -= pago_banco_total
+                pago_banco_capital = monto_a_pagar_banco - pago_banco_interes
+                
+                es_rango_terreno = (m >= inicio_pago_t and m <= fin_pago_t)
+                p_terr, p_const = 0, 0
+                
+                if es_rango_terreno:
+                    if prioridad_t:
+                        p_terr = min(real_terr_uf, monto_a_pagar_banco)
+                        p_const = min(real_const_uf, monto_a_pagar_banco - p_terr)
+                    else:
+                        if deuda_banco_total > 0:
+                            p_terr = monto_a_pagar_banco * (real_terr_uf / deuda_banco_total)
+                            p_const = monto_a_pagar_banco * (real_const_uf / deuda_banco_total)
+                else:
+                    p_const = min(real_const_uf, monto_a_pagar_banco)
+                
+                # Descontar Saldos
+                if p_terr > 0 and real_terr_uf > 0:
+                    prop = p_terr / real_terr_uf
+                    # Ajuste fino para evitar decimales residuales en cierre
+                    if es_mes_cierre and p_terr >= real_terr_uf - 0.1: 
+                         saldo_terr_uf = 0
+                         saldo_terr_clp_nominal = 0
+                    else:
+                        saldo_terr_uf -= (saldo_terr_uf * prop)
+                        saldo_terr_clp_nominal -= (saldo_terr_clp_nominal * prop)
+
+                if p_const > 0 and real_const_uf > 0:
+                    prop = p_const / real_const_uf
+                    if es_mes_cierre and p_const >= real_const_uf - 0.1:
+                        saldo_const_uf = 0
+                        saldo_const_clp_nominal = 0
+                    else:
+                        saldo_const_uf -= (saldo_const_uf * prop)
+                        saldo_const_clp_nominal -= (saldo_const_clp_nominal * prop)
+                
+                pago_banco_total = monto_a_pagar_banco
+                dinero_para_deuda -= pago_banco_total # Puede quedar negativo si es cierre forzado
 
         # --- B. KPs ---
         pago_kps_total = 0
         pago_kps_interes = 0
         saldo_total_kps_contable = sum(k['saldo'] for k in kps_activos)
         
-        if dinero_para_deuda > 0 and saldo_total_kps_contable > 0:
-            monto_interes_kp_pagar = min(dinero_para_deuda, total_interes_kp_exigible_hoy)
-            # Prorrateo de interés
-            for kp in kps_activos:
-                exigible_kp = 0
-                if kp["frecuencia"] == "Mensual": exigible_kp = (kp["saldo"] * kp["tasa_mensual"])
-                elif kp["frecuencia"] == "Trimestral" and m % 3 == 0: exigible_kp = kp["acumulado_trimestre"]
+        if saldo_total_kps_contable > 0:
+            if es_mes_cierre:
+                # Pagamos todo (Interés exigible hoy + Capital + Interés no devengado si hubiera)
+                # Simplificación: Saldo contable incluye todo el interés devengado acumulado en 'saldo'
+                monto_total_kp_pagar = saldo_total_kps_contable
                 
-                if total_interes_kp_exigible_hoy > 0:
-                    peso_int = exigible_kp / total_interes_kp_exigible_hoy
-                    pago_i = monto_interes_kp_pagar * peso_int
-                    kp["saldo"] -= pago_i
-            pago_kps_interes = monto_interes_kp_pagar
-            dinero_para_deuda -= pago_kps_interes
+                # Asumimos que todo el saldo se liquida
+                pago_kps_interes = 0 # Referencial visual
+                pago_kps_total = monto_total_kp_pagar
+                
+                for kp in kps_activos: kp["saldo"] = 0
+                
+                dinero_para_deuda -= pago_kps_total
             
-            # Pago Capital
-            if dinero_para_deuda > 0:
-                monto_capital_kp = min(dinero_para_deuda, sum(k['saldo'] for k in kps_activos))
-                pago_kps_total = pago_kps_interes + monto_capital_kp
-                saldo_kps_actual = sum(k['saldo'] for k in kps_activos)
-                # Prorrateo de capital
+            elif dinero_para_deuda > 0:
+                monto_interes_kp_pagar = min(dinero_para_deuda, total_interes_kp_exigible_hoy)
                 for kp in kps_activos:
-                    if saldo_kps_actual > 0:
-                        peso = kp["saldo"] / saldo_kps_actual
-                        abono = monto_capital_kp * peso
-                        kp["saldo"] -= abono
-                dinero_para_deuda -= monto_capital_kp
-            else:
-                pago_kps_total = pago_kps_interes
+                    exigible_kp = 0
+                    if kp["frecuencia"] == "Mensual": exigible_kp = (kp["saldo"] * kp["tasa_mensual"])
+                    elif kp["frecuencia"] == "Trimestral" and m % 3 == 0: exigible_kp = kp["acumulado_trimestre"]
+                    
+                    if total_interes_kp_exigible_hoy > 0:
+                        peso_int = exigible_kp / total_interes_kp_exigible_hoy
+                        pago_i = monto_interes_kp_pagar * peso_int
+                        kp["saldo"] -= pago_i
+                pago_kps_interes = monto_interes_kp_pagar
+                dinero_para_deuda -= pago_kps_interes
+                
+                if dinero_para_deuda > 0:
+                    monto_capital_kp = min(dinero_para_deuda, sum(k['saldo'] for k in kps_activos))
+                    pago_kps_total = pago_kps_interes + monto_capital_kp
+                    saldo_kps_actual = sum(k['saldo'] for k in kps_activos)
+                    for kp in kps_activos:
+                        if saldo_kps_actual > 0:
+                            peso = kp["saldo"] / saldo_kps_actual
+                            abono = monto_capital_kp * peso
+                            kp["saldo"] -= abono
+                    dinero_para_deuda -= monto_capital_kp
+                else:
+                    pago_kps_total = pago_kps_interes
 
         # --- C. Relacionada ---
         pago_rel_total = 0
         pago_rel_interes = 0
         saldo_total_rel_contable = sum(r['saldo'] for r in rel_activos)
         
-        if dinero_para_deuda > 0 and saldo_total_rel_contable > 0:
-            # 1. Pago Intereses
-            monto_interes_rel_pagar = min(dinero_para_deuda, total_interes_rel_exigible_hoy)
-            # Prorrateo Interés
-            for rel in rel_activos:
-                exigible_rel = 0
-                if rel["frecuencia"] == "Mensual": exigible_rel = (rel["saldo"] * rel["tasa_mensual"])
-                elif rel["frecuencia"] == "Trimestral" and m % 3 == 0: exigible_rel = rel["acumulado_trimestre"]
-                
-                if total_interes_rel_exigible_hoy > 0:
-                    peso_int = exigible_rel / total_interes_rel_exigible_hoy
-                    pago_i = monto_interes_rel_pagar * peso_int
-                    rel["saldo"] -= pago_i
+        if saldo_total_rel_contable > 0:
+            if es_mes_cierre:
+                monto_total_rel_pagar = saldo_total_rel_contable
+                pago_rel_total = monto_total_rel_pagar
+                for rel in rel_activos: rel["saldo"] = 0
+                dinero_para_deuda -= pago_rel_total
             
-            pago_rel_interes = monto_interes_rel_pagar
-            dinero_para_deuda -= pago_rel_interes
-            
-            # 2. Pago Capital
-            if dinero_para_deuda > 0:
-                monto_capital_rel = min(dinero_para_deuda, sum(r['saldo'] for r in rel_activos))
-                pago_rel_total = pago_rel_interes + monto_capital_rel
-                saldo_rel_actual = sum(r['saldo'] for r in rel_activos)
-                # Prorrateo Capital
+            elif dinero_para_deuda > 0:
+                monto_interes_rel_pagar = min(dinero_para_deuda, total_interes_rel_exigible_hoy)
                 for rel in rel_activos:
-                    if saldo_rel_actual > 0:
-                        peso = rel["saldo"] / saldo_rel_actual
-                        abono = monto_capital_rel * peso
-                        rel["saldo"] -= abono
-                dinero_para_deuda -= monto_capital_rel
-            else:
-                pago_rel_total = pago_rel_interes
+                    exigible_rel = 0
+                    if rel["frecuencia"] == "Mensual": exigible_rel = (rel["saldo"] * rel["tasa_mensual"])
+                    elif rel["frecuencia"] == "Trimestral" and m % 3 == 0: exigible_rel = rel["acumulado_trimestre"]
+                    
+                    if total_interes_rel_exigible_hoy > 0:
+                        peso_int = exigible_rel / total_interes_rel_exigible_hoy
+                        pago_i = monto_interes_rel_pagar * peso_int
+                        rel["saldo"] -= pago_i
+                pago_rel_interes = monto_interes_rel_pagar
+                dinero_para_deuda -= pago_rel_interes
+                
+                if dinero_para_deuda > 0:
+                    monto_capital_rel = min(dinero_para_deuda, sum(r['saldo'] for r in rel_activos))
+                    pago_rel_total = pago_rel_interes + monto_capital_rel
+                    saldo_rel_actual = sum(r['saldo'] for r in rel_activos)
+                    for rel in rel_activos:
+                        if saldo_rel_actual > 0:
+                            peso = rel["saldo"] / saldo_rel_actual
+                            abono = monto_capital_rel * peso
+                            rel["saldo"] -= abono
+                    dinero_para_deuda -= monto_capital_rel
+                else:
+                    pago_rel_total = pago_rel_interes
 
         # --- RESULTADOS ---
         total_pagado_intereses = pago_banco_interes + pago_kps_interes + pago_rel_interes
@@ -560,60 +542,52 @@ st.title("📊 Análisis Gasto financiero proyectos inmobiliarios")
 
 col_inputs, col_dash = st.columns([1.3, 2.7], gap="medium")
 
-# Lógica de cálculo inicial
 if 'calc_results' not in st.session_state:
     st.session_state.calc_results = {name: calcular_flujo(st.session_state.data_scenarios[name]) for name in SCENARIOS}
 
 with col_inputs:
     st.markdown("### Configuración")
     
-    # --- 1. GESTIÓN DE ESTADO PARA EXPANDIR/COLAPSAR ---
     col_btn1, col_btn2 = st.columns(2)
     
-    # Botón Expandir
     if col_btn1.button("🔽 Expandir Todo", key="btn_expand", use_container_width=True):
         st.session_state.menu_expanded = True
-        st.session_state.exp_reset_token += 1 # Cambiamos el token para forzar redibujado
+        st.session_state.exp_reset_token += 1 
         st.rerun()
         
-    # Botón Colapsar
     if col_btn2.button("🔼 Colapsar Todo", key="btn_collapse", use_container_width=True):
         st.session_state.menu_expanded = False
-        st.session_state.exp_reset_token += 1 # Cambiamos el token para forzar redibujado
+        st.session_state.exp_reset_token += 1 
         st.rerun()
     
-    # --- BOTÓN DE PROCESAR ---
     if st.button("🚀 Procesar y Actualizar", type="primary", use_container_width=True):
         st.session_state.calc_results = {name: calcular_flujo(st.session_state.data_scenarios[name]) for name in SCENARIOS}
         st.rerun()
-    # ---------------------------------------------
     
     tabs = st.tabs(["🟦 Real", "🟩 Optimista", "🟥 Pesimista"])
     
     def render_scenario_inputs(scen_key):
         data = st.session_state.data_scenarios[scen_key]
         is_expanded = st.session_state.menu_expanded
-        
-        # TRUCO: Generamos un sufijo invisible que cambia al pulsar los botones.
-        # Esto obliga al expander a reiniciarse y obedecer el estado 'is_expanded'.
-        # \u200b es un "Espacio de anchura cero".
         lbl_suffix = "\u200b" * st.session_state.exp_reset_token
         
         with st.container():
-            # Agregamos el sufijo invisible al título
             with st.expander(f"🏗️ Proyecto Base & Costos{lbl_suffix}", expanded=is_expanded):
                 data["valor_terreno"] = st.number_input("Valor Terreno (UF)", value=data["valor_terreno"], key=f"{scen_key}_vt")
                 data["pct_fin_terreno"] = st.slider("% Fin. Terreno", 0, 100, data["pct_fin_terreno"], key=f"{scen_key}_fin_t")
                 data["valor_contrato"] = st.number_input("Costo Const. (UF)", value=data["valor_contrato"], key=f"{scen_key}_vc")
                 data["pct_fin_construccion"] = st.slider("% Fin. Construcción", 0, 100, data["pct_fin_construccion"], key=f"{scen_key}_fin_c")
                 
-                # --- NUEVA OPCIÓN: MES DE RECEPCIÓN FINAL Y GANTT ---
                 c_obra, c_ini, c_recep = st.columns(3)
                 data["duracion_obra"] = c_obra.number_input("Meses Obra", value=data["duracion_obra"], key=f"{scen_key}_dur")
                 data["mes_inicio_obra"] = c_ini.number_input("Mes Inicio Obra (Gantt)", value=data.get("mes_inicio_obra", 1), key=f"{scen_key}_ini_obra")
                 data["mes_recepcion"] = c_recep.number_input("Mes Recepción Final", value=data["mes_recepcion"], key=f"{scen_key}_recep")
                 
-                data["saldo_inicial_uf"] = st.number_input("Saldo Inicial Banco (UF)", value=data.get("saldo_inicial_uf", 0.0), key=f"{scen_key}_ini")
+                st.markdown("---")
+                st.caption("🏦 Estado Situación Inicial")
+                c_sald1, c_sald2 = st.columns(2)
+                data["saldo_inicial_uf"] = c_sald1.number_input("Deuda Inicial (Capital Vivo)", value=data.get("saldo_inicial_uf", 0.0), help="Deuda vigente al mes 0. ESTO GENERA INTERESES.", key=f"{scen_key}_ini")
+                data["intereses_previos_uf"] = c_sald2.number_input("Intereses Ya Pagados (Histórico)", value=data.get("intereses_previos_uf", 0.0), help="Intereses pagados antes de este flujo. Solo suma al costo total.", key=f"{scen_key}_int_prev")
                 
                 st.markdown("---")
                 st.caption("📋 Otros Costos No Financieros")
@@ -628,7 +602,6 @@ with col_inputs:
                 data["tasa_anual_clp"] = c2.number_input("Tasa CLP", value=data["tasa_anual_clp"], step=0.1, key=f"{scen_key}_tclp")
                 data["inflacion_anual"] = c3.number_input("Infl. %", value=data["inflacion_anual"], step=0.1, key=f"{scen_key}_inf")
                 
-                # CHECKBOX DE PAGO DE INTERESES DURANTE CONSTRUCCION
                 data["pagar_intereses_construccion"] = st.checkbox("Pagar intereses durante construcción (Equity)", value=data.get("pagar_intereses_construccion", False), key=f"{scen_key}_pay_int")
                 
                 st.markdown("**Pago Terreno**")
@@ -638,7 +611,6 @@ with col_inputs:
 
             with st.expander(f"🤝 Deuda Privada (KPs y Relac.){lbl_suffix}", expanded=is_expanded):
                 st.markdown("##### Préstamo Relacionada")
-                
                 if st.button("➕ Agregar Deuda Relacionada", key=f"add_rel_{scen_key}"):
                     data["lista_relacionadas"].append({"nombre": f"Rel {len(data.get('lista_relacionadas', []))+1}", "monto": 5000.0, "tasa_anual": 8.0, "frecuencia_pago": "Al Final", "mes_inicio": 1})
                     st.rerun()
@@ -650,22 +622,16 @@ with col_inputs:
                     rel["monto"] = r1.number_input("Monto", value=float(rel["monto"]), key=f"rm_{scen_key}_{i}")
                     rel["tasa_anual"] = r2.number_input("Tasa %", value=float(rel["tasa_anual"]), step=0.1, key=f"rt_{scen_key}_{i}")
                     rel["mes_inicio"] = r3.number_input("Mes Inicio", value=int(rel.get("mes_inicio", 1)), key=f"rini_{scen_key}_{i}")
-                    
                     r4, r5 = st.columns([2, 1])
                     rel["frecuencia_pago"] = r4.selectbox("Pago Interés", ["Mensual", "Trimestral", "Al Final"], index=["Mensual", "Trimestral", "Al Final"].index(rel.get("frecuencia_pago", "Al Final")), key=f"rf_{scen_key}_{i}")
-                    
-                    if r5.button("🗑️", key=f"del_rel_{scen_key}_{i}"):
-                        idx_rel_remove.append(i)
+                    if r5.button("🗑️", key=f"del_rel_{scen_key}_{i}"): idx_rel_remove.append(i)
                     st.divider()
-                
                 if idx_rel_remove:
-                    for i in sorted(idx_rel_remove, reverse=True):
-                        data["lista_relacionadas"].pop(i)
+                    for i in sorted(idx_rel_remove, reverse=True): data["lista_relacionadas"].pop(i)
                     st.rerun()
 
                 st.markdown("---")
                 st.markdown("##### Inversionistas (KPs)")
-                
                 if st.button("➕ Agregar KP", key=f"add_kp_{scen_key}"):
                     data["lista_kps"].append({"nombre": f"KP {len(data['lista_kps'])+1}", "monto": 1000.0, "tasa_anual": 10.0, "plazo": 24, "frecuencia_pago": "Mensual", "mes_inicio": 1})
                     st.rerun()
@@ -677,25 +643,19 @@ with col_inputs:
                     kp["monto"] = k1.number_input("Monto", value=float(kp["monto"]), key=f"kpm_{scen_key}_{i}")
                     kp["tasa_anual"] = k2.number_input("Tasa %", value=float(kp["tasa_anual"]), step=0.1, key=f"kpt_{scen_key}_{i}")
                     kp["mes_inicio"] = k3.number_input("Mes Inicio", value=int(kp.get("mes_inicio", 1)), key=f"kpini_{scen_key}_{i}") 
-                    
                     k4, k5 = st.columns([2, 1])
                     kp["plazo"] = k4.number_input("Plazo", value=int(kp["plazo"]), key=f"kpp_{scen_key}_{i}")
                     kp["frecuencia_pago"] = k4.selectbox("Pago Interés", ["Mensual", "Trimestral", "Al Final"], index=["Mensual", "Trimestral", "Al Final"].index(kp.get("frecuencia_pago", "Mensual")), key=f"kpf_{scen_key}_{i}")
-                    
-                    if k5.button("🗑️", key=f"del_kp_{scen_key}_{i}"):
-                        idx_kp_remove.append(i)
+                    if k5.button("🗑️", key=f"del_kp_{scen_key}_{i}"): idx_kp_remove.append(i)
                     st.divider()
-                
                 if idx_kp_remove:
-                    for i in sorted(idx_kp_remove, reverse=True):
-                        data["lista_kps"].pop(i)
+                    for i in sorted(idx_kp_remove, reverse=True): data["lista_kps"].pop(i)
                     st.rerun()
 
             with st.expander(f"💰 Plan de Ventas{lbl_suffix}", expanded=is_expanded):
                 data["valor_venta_total"] = st.number_input("Venta Total (UF)", value=data["valor_venta_total"], key=f"{scen_key}_vvt")
                 lista_ventas = data["plan_ventas"]
                 total_pct = sum([item["pct"] for item in lista_ventas])
-                
                 col_bar, col_txt = st.columns([3, 1])
                 col_bar.progress(min(total_pct / 100.0, 1.0))
                 col_txt.markdown(f"**{total_pct:.1f}%**")
@@ -704,7 +664,6 @@ with col_inputs:
                     last_mes = lista_ventas[-1]["mes"] if lista_ventas else 23
                     data["plan_ventas"].append({"mes": last_mes + 1, "pct": max(0.0, 100.0 - total_pct)})
                     st.rerun()
-
                 idx_v_rem = []
                 for i, r in enumerate(lista_ventas):
                     c1, c2, c3 = st.columns([1.5, 1.5, 0.5])
@@ -719,15 +678,12 @@ with col_inputs:
     with tabs[1]: render_scenario_inputs("Optimista")
     with tabs[2]: render_scenario_inputs("Pesimista")
 
-# --- CALCULO AUTOMÁTICO (REACTIVO) ---
+# --- CALCULO AUTOMÁTICO ---
 results = {name: calcular_flujo(st.session_state.data_scenarios[name]) for name in SCENARIOS}
 res = results["Real"]
-
-# Función lambda para formatear miles con punto
 fmt_nums = lambda x: f"{x:,.0f}".replace(",", ".")
 
 with col_dash:
-    
     st.markdown("### 🏆 KPIs Escenario Real")
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Utilidad", f"{res['utilidad']:,.0f} UF")
@@ -735,88 +691,65 @@ with col_dash:
     k3.metric("Mes flujo positivo", f"Mes {res['break_even']}" if res['break_even'] else "N/A")
     k4.metric("Peak Deuda", f"{res['peak_deuda']:,.0f} UF")
 
-    # --- TARJETA DE INTERESES (DEVENGADO TOTAL) ---
-    st.markdown("#### 💳 Costos Financieros (Total Devengado)")
+    # --- TARJETA DE INTERESES ---
+    st.markdown("#### 💳 Costos Financieros Totales")
+    int_previos = st.session_state.data_scenarios["Real"].get("intereses_previos_uf", 0.0)
+    total_fin_global = res['costo_financiero_total'] + int_previos
+    
     with st.container():
         st.markdown('<div class="interest-card">', unsafe_allow_html=True)
-        st.markdown('<div class="interest-title">Desglose de Intereses Proyectados (Devengado)</div>', unsafe_allow_html=True)
-        
+        st.markdown('<div class="interest-title">Desglose Global (Simulación + Histórico)</div>', unsafe_allow_html=True)
         det = res["detalles_fin"]
         ic1, ic2, ic3, ic4 = st.columns(4)
-        
-        ic1.metric("🏦 Banco", f"{det['banco']:,.0f} UF")
-        ic2.metric("🤝 Total KPs", f"{det['kps']:,.0f} UF")
-        ic3.metric("🏢 Relacionada", f"{det['relacionada']:,.0f} UF")
-        ic4.metric("💰 TOTAL GLOBAL", f"{res['costo_financiero_total']:,.0f} UF", delta="Interés Total")
-        
+        ic1.metric("🏦 Banco (Futuro)", f"{det['banco']:,.0f} UF")
+        ic2.metric("⏮️ Int. Previos", f"{int_previos:,.0f} UF", help="Intereses pagados antes del inicio de la simulación")
+        ic3.metric("🤝 Privados (KPs/Rel)", f"{det['kps'] + det['relacionada']:,.0f} UF")
+        ic4.metric("💰 COSTO TOTAL", f"{total_fin_global:,.0f} UF", delta="Final del Proyecto")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with st.expander("📋 Tabla Detallada (Verificación de Pagos)", expanded=False):
-        # 1. Definimos las columnas nuevas (desglosadas)
         cols_show = ["Mes", "Ingresos", "Ingresos Deuda", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
-        
-        # 2. Crear copia para visualización
         df_display = res["df"][cols_show].copy()
         df_display["Mes"] = df_display["Mes"].astype(str)
-
-        # 3. Calcular fila de TOTAL
         total_row = {
             "Mes": "TOTAL",
             "Ingresos": df_display["Ingresos"].sum(),
             "Ingresos Deuda": df_display["Ingresos Deuda"].sum(), 
             "Otros Costos (Op)": df_display["Otros Costos (Op)"].sum(),
-            
-            # Sumamos las columnas desglosadas (Pagado)
             "Int. Banco": df_display["Int. Banco"].sum(),
             "Int. KPs": df_display["Int. KPs"].sum(),
             "Int. Relac.": df_display["Int. Relac."].sum(),
-            
             "Pago Capital": df_display["Pago Capital"].sum(),
             "Flujo Neto": df_display["Flujo Neto"].sum(),
             "Flujo Acumulado": df_display["Flujo Neto"].sum(), 
             "Deuda Total": 0.0 
         }
-
-        # 4. Concatenar
         df_final = pd.concat([df_display, pd.DataFrame([total_row])], ignore_index=True)
-
-        # 5. Formatear explícitamente con puntos
         cols_nums = ["Ingresos", "Ingresos Deuda", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
-        
         for col in cols_nums:
             df_final[col] = df_final[col].apply(lambda x: f"{x:,.0f} UF".replace(",", ".") if pd.notnull(x) else "0 UF")
+        st.dataframe(df_final, use_container_width=True, height=400, column_config={
+            "Mes": st.column_config.TextColumn("Mes"),
+            "Ingresos": st.column_config.TextColumn("Ingresos"),
+            "Ingresos Deuda": st.column_config.TextColumn("Ingresos Deuda"), 
+            "Otros Costos (Op)": st.column_config.TextColumn("Otros Costos"),
+            "Int. Banco": st.column_config.TextColumn("Int. Banco (Pagado)"),
+            "Int. KPs": st.column_config.TextColumn("Int. KPs (Pagado)"),
+            "Int. Relac": st.column_config.TextColumn("Int. Relac. (Pagado)"),
+            "Pago Capital": st.column_config.TextColumn("Capital"),
+            "Flujo Neto": st.column_config.TextColumn("Flujo Neto"),
+            "Flujo Acumulado": st.column_config.TextColumn("Acumulado"),
+            "Deuda Total": st.column_config.TextColumn("Deuda Viva"),
+        })
 
-        # 6. Mostrar con Configuración de Columnas
-        st.dataframe(
-            df_final, 
-            use_container_width=True, 
-            height=400,
-            column_config={
-                "Mes": st.column_config.TextColumn("Mes"),
-                "Ingresos": st.column_config.TextColumn("Ingresos"),
-                "Ingresos Deuda": st.column_config.TextColumn("Ingresos Deuda"), 
-                "Otros Costos (Op)": st.column_config.TextColumn("Otros Costos"),
-                "Int. Banco": st.column_config.TextColumn("Int. Banco (Pagado)"),
-                "Int. KPs": st.column_config.TextColumn("Int. KPs (Pagado)"),
-                "Int. Relac": st.column_config.TextColumn("Int. Relac. (Pagado)"),
-                "Pago Capital": st.column_config.TextColumn("Capital"),
-                "Flujo Neto": st.column_config.TextColumn("Flujo Neto"),
-                "Flujo Acumulado": st.column_config.TextColumn("Acumulado"),
-                "Deuda Total": st.column_config.TextColumn("Deuda Viva"),
-            }
-        )
-
-    # --- NUEVA SECCIÓN: ANÁLISIS POR HITOS (ESCENARIO REAL) ---
+    # --- ANÁLISIS POR HITOS ---
     st.markdown("---")
-    st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos (Escenario Real - DEVENGADO)")
+    st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos (Devengado Futuro)")
     
-    # Obtener parámetros del escenario Real
     params_real = st.session_state.data_scenarios["Real"]
-    
-    # LOGICA GANTT EN HITOS
     mes_inicio_obra = int(params_real.get("mes_inicio_obra", 1))
     duracion_obra = int(params_real["duracion_obra"])
-    mes_construccion = mes_inicio_obra + duracion_obra - 1 # Mes Término
+    mes_construccion = mes_inicio_obra + duracion_obra - 1
     mes_recepcion = int(params_real["mes_recepcion"])
     
     df_real = res["df"]
@@ -824,50 +757,42 @@ with col_dash:
         mes_ultimo_recupero = df_real[df_real["Ingresos"] > 0].iloc[-1]["Mes"]
     except IndexError:
         mes_ultimo_recupero = mes_recepcion 
-        
     mes_ultimo_recupero = int(mes_ultimo_recupero)
-    
+    mes_fin_simulacion = df_real["Mes"].max()
+
     milestones = [
         {"nombre": "Término Construcción", "mes": mes_construccion},
         {"nombre": "Recepción Final", "mes": mes_recepcion},
-        {"nombre": "Último Recupero (Fin Ventas)", "mes": mes_ultimo_recupero}
+        {"nombre": "Último Recupero (Cierre Deuda)", "mes": mes_ultimo_recupero},
+        {"nombre": "Fin Simulación (Cierre)", "mes": mes_fin_simulacion}
     ]
     
     milestone_data = []
-    total_costo_fin = res["costo_financiero_total"]
+    total_costo_simulacion = res["costo_financiero_total"]
     
     for ms in milestones:
-        # Filtramos hasta el mes del hito (acumulado)
         df_cut = df_real[df_real["Mes"] <= ms["mes"]]
-        
         acum_banco = df_cut["Devengado Banco"].sum()
         acum_kps = df_cut["Devengado KPs"].sum()
         acum_relac = df_cut["Devengado Relac."].sum() 
         total_acum = acum_banco + acum_kps + acum_relac
-        
-        pct_avance = (total_acum / total_costo_fin * 100) if total_costo_fin > 0 else 0
-        
+        pct_avance = (total_acum / total_costo_simulacion * 100) if total_costo_simulacion > 0 else 0
         milestone_data.append({
             "Hito": f"{ms['nombre']} (Mes {ms['mes']})",
-            "Acum. Banco (Dev.)": fmt_nums(acum_banco),
-            "Acum. KPs (Dev.)": fmt_nums(acum_kps),
-            "Acum. Relac. (Dev.)": fmt_nums(acum_relac),
-            "Total Acumulado": fmt_nums(total_acum),
-            "% del Total Fin.": f"{pct_avance:.1f}%"
+            "Acum. Banco": fmt_nums(acum_banco),
+            "Acum. Privados": fmt_nums(acum_kps + acum_relac),
+            "Total Devengado": fmt_nums(total_acum),
+            "% del Total": f"{pct_avance:.1f}%"
         })
         
     df_milestones = pd.DataFrame(milestone_data)
     st.dataframe(df_milestones, use_container_width=True, hide_index=True)
 
-
-    # --- SECCIÓN COMPARATIVA (AL FINAL) ---
+    # --- COMPARATIVA ---
     st.markdown("---")
     st.header("⚖️ Comparativa de Escenarios")
-
-    # 1. Preparar Datos para Comparar
     comp_data = []
     for sc in SCENARIOS:
-        # Check if result exists
         if sc in st.session_state.calc_results:
             r = st.session_state.calc_results[sc]
             comp_data.append({
@@ -878,87 +803,32 @@ with col_dash:
                 "Total Intereses (Dev.)": r["costo_financiero_total"],
                 "Mes Break Even": r["break_even"] if r["break_even"] is not None else "N/A"
             })
-
     df_comp = pd.DataFrame(comp_data)
-
-    # 2. Layout Visual
     c_chart, c_table = st.columns([1.5, 1])
-
     with c_chart:
         st.subheader("Costos Financieros por Escenario (Devengado)")
         fig_c = go.Figure()
-        
-        # Barra Banco
-        fig_c.add_trace(go.Bar(
-            name='Banco', 
-            x=df_comp['Escenario'], 
-            y=df_comp['Int. Banco (Dev.)'], 
-            marker_color='#3B82F6',
-            text=df_comp['Int. Banco (Dev.)'].apply(fmt_nums), 
-            textposition='auto' 
-        ))
-        
-        # Barra KPs
-        fig_c.add_trace(go.Bar(
-            name='KPs', 
-            x=df_comp['Escenario'], 
-            y=df_comp['Int. KPs (Dev.)'], 
-            marker_color='#A855F7',
-            text=df_comp['Int. KPs (Dev.)'].apply(fmt_nums), 
-            textposition='auto'
-        ))
-        
-        # Barra Relacionada
-        fig_c.add_trace(go.Bar(
-            name='Relacionada', 
-            x=df_comp['Escenario'], 
-            y=df_comp['Int. Relac. (Dev.)'], 
-            marker_color='#F97316',
-            text=df_comp['Int. Relac. (Dev.)'].apply(fmt_nums), 
-            textposition='auto'
-        ))
-        
-        fig_c.update_layout(
-            barmode='group', 
-            template="plotly_dark", 
-            height=350, 
-            legend_title="Tipo Interés",
-            font=dict(size=15) 
-        )
+        fig_c.add_trace(go.Bar(name='Banco', x=df_comp['Escenario'], y=df_comp['Int. Banco (Dev.)'], marker_color='#3B82F6', text=df_comp['Int. Banco (Dev.)'].apply(fmt_nums), textposition='auto'))
+        fig_c.add_trace(go.Bar(name='KPs', x=df_comp['Escenario'], y=df_comp['Int. KPs (Dev.)'], marker_color='#A855F7', text=df_comp['Int. KPs (Dev.)'].apply(fmt_nums), textposition='auto'))
+        fig_c.add_trace(go.Bar(name='Relacionada', x=df_comp['Escenario'], y=df_comp['Int. Relac. (Dev.)'], marker_color='#F97316', text=df_comp['Int. Relac. (Dev.)'].apply(fmt_nums), textposition='auto'))
+        fig_c.update_layout(barmode='group', template="plotly_dark", height=350, legend_title="Tipo Interés", font=dict(size=15))
         st.plotly_chart(fig_c, use_container_width=True)
-
     with c_table:
         st.subheader("Resumen Numérico")
-        
-        # Formateo visual para la tabla
         df_show = df_comp.copy()
         cols_num = ["Int. Banco (Dev.)", "Int. KPs (Dev.)", "Int. Relac. (Dev.)", "Total Intereses (Dev.)"]
-        for col in cols_num:
-            df_show[col] = df_show[col].apply(fmt_nums)
-        
-        st.dataframe(
-            df_show, 
-            use_container_width=True, 
-            hide_index=True,
-            height=350
-        )
+        for col in cols_num: df_show[col] = df_show[col].apply(fmt_nums)
+        st.dataframe(df_show, use_container_width=True, hide_index=True, height=350)
 
     # --- GRÁFICOS VISUALES AL FINAL ---
     st.markdown("---")
     st.header("📈 Visualización de Flujo de Caja (Escenario Real)")
-    
     df = res["df"]
-
     st.markdown("### 🌊 Flujo de Caja")
     fig_cash = go.Figure()
-    fig_cash.add_trace(go.Bar(
-        x=df["Mes"], y=df["Flujo Neto"], name="Neto Mensual",
-        marker_color=df["Flujo Neto"].apply(lambda x: '#10B981' if x >= 0 else '#EF4444')
-    ))
-    fig_cash.add_trace(go.Scatter(
-        x=df["Mes"], y=df["Flujo Acumulado"], name="Acumulado", mode='lines',
-        line=dict(color='#FACC15', width=3, dash='dot')
-    ))
+    fig_cash.add_trace(go.Bar(x=df["Mes"], y=df["Flujo Neto"], name="Neto Mensual", marker_color=df["Flujo Neto"].apply(lambda x: '#10B981' if x >= 0 else '#EF4444')))
+    fig_cash.add_trace(go.Scatter(x=df["Mes"], y=df["Flujo Acumulado"], name="Acumulado", mode='lines', line=dict(color='#FACC15', width=3, dash='dot')))
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
+
