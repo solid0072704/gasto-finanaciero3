@@ -88,7 +88,7 @@ def get_default_config(type_scen):
         "duracion_obra": 18,
         "mes_inicio_obra": 1,
         
-        # NUEVO PARÁMETRO: % del contrato que se gasta el mes 1
+        # PARAMETRO: % del contrato que se gasta el mes 1
         "pct_avance_inicial": 20.0, 
         
         "mes_recepcion": 22,
@@ -222,7 +222,8 @@ def calcular_flujo(data):
         "Mes": 0,
         "Deuda Total": (saldo_const_uf + saldo_terr_uf) + (saldo_const_clp_nominal + saldo_terr_clp_nominal) + saldo_total_rel + saldo_total_kps,
         "Ingresos": 0.0, "Ingresos Deuda": ingreso_deuda_mes_0, "Otros Costos (Op)": 0.0,
-        "Int. Banco": 0.0, "Int. KPs": 0.0, "Int. Relac.": 0.0,
+        "Int. Banco": 0.0, "Int. KPs": 0.0, 
+        "Int. Relac.": 0.0, # IMPORTANTE: Nombre con punto al final
         "Devengado Banco": 0.0, "Devengado KPs": 0.0, "Devengado Relac.": 0.0,
         "Pago Intereses Total": 0.0, "Pago Capital": 0.0,
         "Inversión (Equity)": inversion_inicial, "Flujo Neto": flujo_neto_ini, "Flujo Acumulado": flujo_neto_ini
@@ -257,17 +258,12 @@ def calcular_flujo(data):
         egreso_equity_const = 0
         
         if m >= inicio_obra and m <= fin_obra:
-            
             if m == inicio_obra:
-                # Primer mes: % definido por usuario (pct_avance_inicial)
-                # Si duracion es 1, se imputa el 100% o lo que diga el usuario,
-                # pero lógicamente debería ser el valor completo.
                 if duracion == 1:
                      costo_mes_total = v_cont
                 else:
                      costo_mes_total = v_cont * pct_avance_inicial
             else:
-                # Meses restantes: El saldo (1 - %) dividido linealmente
                 pct_restante = 1.0 - pct_avance_inicial
                 remanente = v_cont * pct_restante
                 meses_restantes = duracion - 1
@@ -524,7 +520,7 @@ def calcular_flujo(data):
             
             "Int. Banco": pago_banco_interes,
             "Int. KPs": pago_kps_interes,
-            "Int. Relac.": pago_rel_interes,
+            "Int. Relac.": pago_rel_interes, # AQUI ESTABA EL ERROR (Faltaba punto) - CORREGIDO
             
             "Devengado Banco": int_banco_mes_en_uf,
             "Devengado KPs": int_kps_generado_mes,
@@ -740,7 +736,7 @@ with col_dash:
             "Otros Costos (Op)": df_display["Otros Costos (Op)"].sum(),
             "Int. Banco": df_display["Int. Banco"].sum(),
             "Int. KPs": df_display["Int. KPs"].sum(),
-            "Int. Relac.": df_display["Int. Relac"].sum(),
+            "Int. Relac.": df_display["Int. Relac."].sum(), # CON PUNTO
             "Pago Capital": df_display["Pago Capital"].sum(),
             "Flujo Neto": df_display["Flujo Neto"].sum(),
             "Flujo Acumulado": df_display["Flujo Neto"].sum(), 
@@ -757,7 +753,7 @@ with col_dash:
             "Otros Costos (Op)": st.column_config.TextColumn("Otros Costos"),
             "Int. Banco": st.column_config.TextColumn("Int. Banco (Pagado)"),
             "Int. KPs": st.column_config.TextColumn("Int. KPs (Pagado)"),
-            "Int. Relac": st.column_config.TextColumn("Int. Relac. (Pagado)"),
+            "Int. Relac.": st.column_config.TextColumn("Int. Relac. (Pagado)"), # CON PUNTO
             "Pago Capital": st.column_config.TextColumn("Capital"),
             "Flujo Neto": st.column_config.TextColumn("Flujo Neto"),
             "Flujo Acumulado": st.column_config.TextColumn("Acumulado"),
@@ -770,7 +766,7 @@ with col_dash:
     
     params_real = st.session_state.data_scenarios["Real"]
     mes_inicio_obra = int(params_real.get("mes_inicio_obra", 1))
-    duracion_obra = int(params_real["duracion_obra"])
+    duracion_obra = int(params_real.get("duracion_obra", 18))
     mes_construccion = mes_inicio_obra + duracion_obra - 1
     mes_recepcion = int(params_real["mes_recepcion"])
     
@@ -860,4 +856,3 @@ with col_dash:
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
-
