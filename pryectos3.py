@@ -8,8 +8,11 @@ st.set_page_config(page_title="Evaluación Inmobiliaria Pro", layout="wide", pag
 # --- 0. LIMPIEZA DE CACHÉ AUTOMÁTICA ---
 if 'data_scenarios' in st.session_state:
     try:
-        # Verificamos si existe la nueva clave
-        test_key = st.session_state.data_scenarios["Real"].get("aporte_socios")
+        test_key = st.session_state.data_scenarios["Real"].get("pct_avance_inicial")
+        # Si ya existe la estructura pero queremos forzar el reinicio a 0 si el usuario recarga:
+        # (Opcional: Si deseas que persista la data al recargar, comenta las siguientes 2 lineas)
+        # if test_key is not None:
+        #    pass 
         if test_key is None: 
             raise KeyError
     except KeyError:
@@ -67,56 +70,38 @@ if 'exp_reset_token' not in st.session_state:
     st.session_state.exp_reset_token = 0
 
 def get_default_config(type_scen):
-    if type_scen == "Optimista":
-        venta, tasa_uf, constr = 155000, 5.5, 68000
-        inflacion, tasa_clp = 3.0, 9.0
-        otros_costos_ini = 2500.0
-    elif type_scen == "Pesimista":
-        venta, tasa_uf, constr = 130000, 8.0, 75000
-        inflacion, tasa_clp = 6.0, 14.0
-        otros_costos_ini = 4000.0
-    else: # Real
-        venta, tasa_uf, constr = 140000, 6.5, 70000
-        inflacion, tasa_clp = 4.0, 11.0
-        otros_costos_ini = 3000.0
-        
+    # Inicializamos TODO en 0 o vacío, sin importar el escenario
     return {
-        "valor_terreno": 30000,
-        "pct_fin_terreno": 60,
-        "valor_contrato": constr,
-        "pct_fin_construccion": 80,
-        "duracion_obra": 18,
-        "mes_inicio_obra": 1,
-        "pct_avance_inicial": 20.0, 
-        "mes_recepcion": 22,
+        "valor_terreno": 0.0,
+        "pct_fin_terreno": 0.0,
+        "valor_contrato": 0.0,
+        "pct_fin_construccion": 0.0,
+        "duracion_obra": 0, # Inicia en 0
+        "mes_inicio_obra": 0,
+        "pct_avance_inicial": 0.0, 
+        "mes_recepcion": 0,
         
         "saldo_inicial_uf": 0.0,
         "intereses_previos_uf": 0.0,
-        "aporte_socios": 0.0, # NUEVA VARIABLE: APORTE SOCIOS
+        "aporte_socios": 0.0,
         
-        "total_otros_costos_inicial": otros_costos_ini,
-        "otros_costos_mensuales": 100.0,
+        "total_otros_costos_inicial": 0.0,
+        "otros_costos_mensuales": 0.0,
         "otros_costos_pagados_anteriores": 0.0,
         
-        "rango_pago_terreno": [1, 60], 
+        "rango_pago_terreno": [1, 60], # Mantenemos rango técnico por defecto del slider
         "prioridad_terreno": False,      
-        "tasa_anual_uf": tasa_uf,
+        "tasa_anual_uf": 0.0,
         "pct_deuda_pesos": 0,      
-        "tasa_anual_clp": tasa_clp, 
-        "inflacion_anual": inflacion,
+        "tasa_anual_clp": 0.0, 
+        "inflacion_anual": 0.0,
         "pagar_intereses_construccion": False,
 
-        "lista_relacionadas": [
-             {"nombre": "Relac. 1", "monto": 5000.0, "tasa_anual": 8.0, "frecuencia_pago": "Al Final", "mes_inicio": 1}
-        ],
-        "lista_kps": [
-            {"nombre": "KP 1", "monto": 2000.0, "tasa_anual": 12.0, "plazo": 24, "frecuencia_pago": "Mensual", "mes_inicio": 1}
-        ],
+        "lista_relacionadas": [], # Lista vacía
+        "lista_kps": [], # Lista vacía
         
-        "valor_venta_total": venta,
-        "plan_ventas": [ 
-            {"mes": 24, "pct": 20.0}, {"mes": 26, "pct": 20.0}, {"mes": 28, "pct": 20.0}, {"mes": 30, "pct": 20.0}, {"mes": 32, "pct": 20.0}
-        ]
+        "valor_venta_total": 0.0,
+        "plan_ventas": [] # Lista vacía
     }
 
 if 'data_scenarios' not in st.session_state:
@@ -130,14 +115,15 @@ def calcular_flujo(data):
     v_otros_mensual = data.get("otros_costos_mensuales", 0.0)
     v_otros_anteriores = data.get("otros_costos_pagados_anteriores", 0.0)
     
-    # NUEVO: Aporte Socios
     v_aporte_socios = data.get("aporte_socios", 0.0)
     
     duracion = int(data["duracion_obra"])
-    inicio_obra = int(data.get("mes_inicio_obra", 1)) 
-    pct_avance_inicial = data.get("pct_avance_inicial", 20.0) / 100.0
+    inicio_obra = int(data.get("mes_inicio_obra", 0)) 
+    pct_avance_inicial = data.get("pct_avance_inicial", 0.0) / 100.0
     recepcion = int(data["mes_recepcion"])
-    fin_obra = inicio_obra + duracion - 1
+    
+    # Validación: Si duración es 0, fin de obra es inicio - 1 (para que el bucle no entre)
+    fin_obra = (inicio_obra + duracion - 1) if duracion > 0 else -1
     
     saldo_inicial = data.get("saldo_inicial_uf", 0)
     rango_terr = data.get("rango_pago_terreno", [1, 60])
@@ -190,7 +176,9 @@ def calcular_flujo(data):
     horizonte = recepcion + 12
     if recuperos:
         horizonte = max(horizonte, max([r["Mes"] for r in recuperos]) + 6)
+    # Ajuste horizonte si hay obra definida, sino minimo
     horizonte = max(horizonte, fin_obra + 6)
+    if horizonte < 12: horizonte = 12 # Minimo por defecto para mostrar algo
         
     flujo = []
     
@@ -203,8 +191,6 @@ def calcular_flujo(data):
     for rel in rel_activos:
         if rel["mes_inicio"] == 0: ingreso_deuda_mes_0 += rel["monto_total"]
             
-    # APORTE SOCIOS: Se suma al flujo neto inicial (Entrada de Caja)
-    # No afecta Inversión (Equity requerido) ni Ingreso Deuda directamente, es un ítem aparte en el flujo.
     flujo_neto_ini = -inversion_inicial + ingreso_deuda_mes_0 + v_aporte_socios
     
     saldo_total_rel = sum(r['saldo'] for r in rel_activos)
@@ -213,15 +199,11 @@ def calcular_flujo(data):
     flujo.append({
         "Mes": 0,
         "Deuda Total": (saldo_const_uf + saldo_terr_uf) + (saldo_const_clp_nominal + saldo_terr_clp_nominal) + saldo_total_rel + saldo_total_kps,
-        "Ingresos": 0.0, 
-        "Ingresos Deuda": ingreso_deuda_mes_0, 
-        "Otros Costos (Op)": 0.0,
+        "Ingresos": 0.0, "Ingresos Deuda": ingreso_deuda_mes_0, "Otros Costos (Op)": 0.0,
         "Int. Banco": 0.0, "Int. KPs": 0.0, "Int. Relac.": 0.0,
         "Devengado Banco": 0.0, "Devengado KPs": 0.0, "Devengado Relac.": 0.0,
         "Pago Intereses Total": 0.0, "Pago Capital": 0.0,
-        "Inversión (Equity)": inversion_inicial, 
-        "Flujo Neto": flujo_neto_ini, 
-        "Flujo Acumulado": flujo_neto_ini
+        "Inversión (Equity)": inversion_inicial, "Flujo Neto": flujo_neto_ini, "Flujo Acumulado": flujo_neto_ini
     })
     
     interes_acum_banco_total = 0 
@@ -302,7 +284,9 @@ def calcular_flujo(data):
 
         # 2. GIROS CONSTRUCCIÓN (Al final)
         egreso_equity_const = 0
-        if m >= inicio_obra and m <= fin_obra:
+        
+        # Validamos que duracion > 0 para entrar a esta logica
+        if duracion > 0 and m >= inicio_obra and m <= fin_obra:
             if m == inicio_obra:
                 costo_mes_total = v_cont if duracion == 1 else v_cont * pct_avance_inicial
             else:
@@ -538,16 +522,15 @@ with col_inputs:
                 data["pct_fin_terreno"] = st.slider("% Fin. Terreno", 0, 100, data["pct_fin_terreno"], key=f"{scen_key}_fin_t")
                 data["valor_contrato"] = st.number_input("Costo Const. (UF)", value=data["valor_contrato"], key=f"{scen_key}_vc")
                 data["pct_fin_construccion"] = st.slider("% Fin. Construcción", 0, 100, data["pct_fin_construccion"], key=f"{scen_key}_fin_c")
-                data["pct_avance_inicial"] = st.slider("% Avance 1er Mes (Giro Inicial)", 0.0, 100.0, float(data.get("pct_avance_inicial", 20.0)), key=f"{scen_key}_pinit")
+                data["pct_avance_inicial"] = st.slider("% Avance 1er Mes (Giro Inicial)", 0.0, 100.0, float(data.get("pct_avance_inicial", 0.0)), key=f"{scen_key}_pinit")
                 
                 c_obra, c_ini, c_recep = st.columns(3)
                 data["duracion_obra"] = c_obra.number_input("Meses Obra", value=data["duracion_obra"], key=f"{scen_key}_dur")
-                data["mes_inicio_obra"] = c_ini.number_input("Mes Inicio Obra (Gantt)", value=data.get("mes_inicio_obra", 1), key=f"{scen_key}_ini_obra")
+                data["mes_inicio_obra"] = c_ini.number_input("Mes Inicio Obra (Gantt)", value=data.get("mes_inicio_obra", 0), key=f"{scen_key}_ini_obra")
                 data["mes_recepcion"] = c_recep.number_input("Mes Recepción Final", value=data["mes_recepcion"], key=f"{scen_key}_recep")
                 
                 st.markdown("---")
                 st.caption("🏦 Estado Situación Inicial")
-                # SE AJUSTA A 3 COLUMNAS PARA INCLUIR EL APORTE SOCIOS
                 c_sald1, c_sald2, c_sald3 = st.columns(3)
                 data["saldo_inicial_uf"] = c_sald1.number_input("Deuda Inicial (Capital Vivo)", value=data.get("saldo_inicial_uf", 0.0), help="Deuda vigente al mes 0. ESTO GENERA INTERESES.", key=f"{scen_key}_ini")
                 data["intereses_previos_uf"] = c_sald2.number_input("Intereses Ya Pagados (Histórico)", value=data.get("intereses_previos_uf", 0.0), help="Intereses pagados antes de este flujo. Solo suma al costo total.", key=f"{scen_key}_int_prev")
@@ -575,7 +558,7 @@ with col_inputs:
             with st.expander(f"🤝 Deuda Privada (KPs y Relac.){lbl_suffix}", expanded=is_expanded):
                 st.markdown("##### Préstamo Relacionada")
                 if st.button("➕ Agregar Deuda Relacionada", key=f"add_rel_{scen_key}"):
-                    data["lista_relacionadas"].append({"nombre": f"Rel {len(data.get('lista_relacionadas', []))+1}", "monto": 5000.0, "tasa_anual": 8.0, "frecuencia_pago": "Al Final", "mes_inicio": 1})
+                    data["lista_relacionadas"].append({"nombre": f"Rel {len(data.get('lista_relacionadas', []))+1}", "monto": 0.0, "tasa_anual": 0.0, "frecuencia_pago": "Al Final", "mes_inicio": 0})
                     st.rerun()
                 idx_rel_remove = []
                 for i, rel in enumerate(data.get("lista_relacionadas", [])):
@@ -583,7 +566,7 @@ with col_inputs:
                     r1, r2, r3 = st.columns(3)
                     rel["monto"] = r1.number_input("Monto", value=float(rel["monto"]), key=f"rm_{scen_key}_{i}")
                     rel["tasa_anual"] = r2.number_input("Tasa %", value=float(rel["tasa_anual"]), step=0.1, key=f"rt_{scen_key}_{i}")
-                    rel["mes_inicio"] = r3.number_input("Mes Inicio", value=int(rel.get("mes_inicio", 1)), key=f"rini_{scen_key}_{i}")
+                    rel["mes_inicio"] = r3.number_input("Mes Inicio", value=int(rel.get("mes_inicio", 0)), key=f"rini_{scen_key}_{i}")
                     r4, r5 = st.columns([2, 1])
                     rel["frecuencia_pago"] = r4.selectbox("Pago Interés", ["Mensual", "Trimestral", "Al Final"], index=["Mensual", "Trimestral", "Al Final"].index(rel.get("frecuencia_pago", "Al Final")), key=f"rf_{scen_key}_{i}")
                     if r5.button("🗑️", key=f"del_rel_{scen_key}_{i}"): idx_rel_remove.append(i)
@@ -595,7 +578,7 @@ with col_inputs:
                 st.markdown("---")
                 st.markdown("##### Inversionistas (KPs)")
                 if st.button("➕ Agregar KP", key=f"add_kp_{scen_key}"):
-                    data["lista_kps"].append({"nombre": f"KP {len(data['lista_kps'])+1}", "monto": 1000.0, "tasa_anual": 10.0, "plazo": 24, "frecuencia_pago": "Mensual", "mes_inicio": 1})
+                    data["lista_kps"].append({"nombre": f"KP {len(data['lista_kps'])+1}", "monto": 0.0, "tasa_anual": 0.0, "plazo": 24, "frecuencia_pago": "Mensual", "mes_inicio": 0})
                     st.rerun()
                 idx_kp_remove = []
                 for i, kp in enumerate(data["lista_kps"]):
@@ -603,7 +586,7 @@ with col_inputs:
                     k1, k2, k3 = st.columns(3)
                     kp["monto"] = k1.number_input("Monto", value=float(kp["monto"]), key=f"kpm_{scen_key}_{i}")
                     kp["tasa_anual"] = k2.number_input("Tasa %", value=float(kp["tasa_anual"]), step=0.1, key=f"kpt_{scen_key}_{i}")
-                    kp["mes_inicio"] = k3.number_input("Mes Inicio", value=int(kp.get("mes_inicio", 1)), key=f"kpini_{scen_key}_{i}") 
+                    kp["mes_inicio"] = k3.number_input("Mes Inicio", value=int(kp.get("mes_inicio", 0)), key=f"kpini_{scen_key}_{i}") 
                     k4, k5 = st.columns([2, 1])
                     kp["plazo"] = k4.number_input("Plazo", value=int(kp["plazo"]), key=f"kpp_{scen_key}_{i}")
                     kp["frecuencia_pago"] = k4.selectbox("Pago Interés", ["Mensual", "Trimestral", "Al Final"], index=["Mensual", "Trimestral", "Al Final"].index(kp.get("frecuencia_pago", "Mensual")), key=f"kpf_{scen_key}_{i}")
@@ -715,10 +698,10 @@ with col_dash:
     st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos (Devengado Futuro)")
     
     params_real = st.session_state.data_scenarios["Real"]
-    mes_inicio_obra = int(params_real.get("mes_inicio_obra", 1))
-    duracion_obra = int(params_real.get("duracion_obra", 18))
-    mes_construccion = mes_inicio_obra + duracion_obra - 1
-    mes_recepcion = int(params_real["mes_recepcion"])
+    mes_inicio_obra = int(params_real.get("mes_inicio_obra", 0))
+    duracion_obra = int(params_real.get("duracion_obra", 0))
+    mes_construccion = (mes_inicio_obra + duracion_obra - 1) if duracion_obra > 0 else 0
+    mes_recepcion = int(params_real.get("mes_recepcion", 0))
     
     int_previos = st.session_state.data_scenarios["Real"].get("intereses_previos_uf", 0.0)
     
