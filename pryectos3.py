@@ -634,25 +634,31 @@ res = results["Real"]
 fmt_nums = lambda x: f"{x:,.0f}".replace(",", ".")
 
 with col_dash:
-    # --- FUNCIONALIDAD 2: BOTÓN EXCEL ---
-    # Creamos un buffer para guardar el excel
-    def to_excel(df_in):
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_in.to_excel(writer, index=False, sheet_name='Flujo')
-        return output.getvalue()
+    # --- FUNCIONALIDAD 2: BOTÓN EXCEL (ROBUSTO) ---
+    def convert_df(df_in):
+        # Intentamos exportar a Excel con xlsxwriter
+        try:
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df_in.to_excel(writer, index=False, sheet_name='Flujo')
+            return output.getvalue(), "flujo_caja.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        except ImportError:
+            # Fallback: Si no está instalado xlsxwriter, devolvemos CSV
+            st.warning("⚠️ Librería 'xlsxwriter' no detectada. Descargando como CSV. Para Excel, agrega 'xlsxwriter' a requirements.txt")
+            return df_in.to_csv(index=False).encode('utf-8'), "flujo_caja.csv", "text/csv"
 
-    # Preparamos el dataframe para exportar (mismas columnas que la tabla)
+    # Preparar datos
     cols_export = ["Mes", "Ingresos", "Ingresos Deuda", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
     df_excel = res["df"][cols_export].copy()
     
-    # Colocamos el botón al principio del dashboard
-    excel_data = to_excel(df_excel)
+    # Generar archivo
+    file_data, file_name, mime_type = convert_df(df_excel)
+    
     st.download_button(
-        label="📥 Descargar Flujo en Excel",
-        data=excel_data,
-        file_name="flujo_caja_inmobiliario.xlsx",
-        mime="application/vnd.ms-excel",
+        label="📥 Descargar Flujo",
+        data=file_data,
+        file_name=file_name,
+        mime=mime_type,
         use_container_width=True
     )
     
@@ -696,7 +702,7 @@ with col_dash:
             "Deuda Total": 0.0 
         }
         df_final = pd.concat([df_display, pd.DataFrame([total_row])], ignore_index=True)
-        for col in cols_export[1:]: # Formatear todas menos Mes
+        for col in cols_export[1:]: 
             df_final[col] = df_final[col].apply(lambda x: f"{x:,.0f} UF".replace(",", ".") if pd.notnull(x) else "0 UF")
         st.dataframe(df_final, use_container_width=True, height=400)
 
@@ -809,6 +815,9 @@ with col_dash:
                 temp_data["valor_contrato"] = costo_sim
                 temp_data["valor_venta_total"] = venta_sim
                 
+                # Para evitar divisiones por cero en simulaciones vacías
+                if temp_data["duracion_obra"] == 0: temp_data["duracion_obra"] = 1
+                
                 resultado = calcular_flujo(temp_data)
                 row_roi.append(resultado["roi"])
                 
@@ -827,15 +836,3 @@ with col_dash:
             height=500, template="plotly_dark"
         )
         st.plotly_chart(fig_sens, use_container_width=True)
-
-    # --- GRÁFICOS VISUALES AL FINAL ---
-    st.markdown("---")
-    st.header("📈 Visualización de Flujo de Caja (Escenario Real)")
-    df = res["df"]
-    st.markdown("### 🌊 Flujo de Caja")
-    fig_cash = go.Figure()
-    fig_cash.add_trace(go.Bar(x=df["Mes"], y=df["Flujo Neto"], name="Neto Mensual", marker_color=df["Flujo Neto"].apply(lambda x: '#10B981' if x >= 0 else '#EF4444')))
-    fig_cash.add_trace(go.Scatter(x=df["Mes"], y=df["Flujo Acumulado"], name="Acumulado", mode='lines', line=dict(color='#FACC15', width=3, dash='dot')))
-    fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
-    fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
-    st.plotly_chart(fig_cash, use_container_width=True)
