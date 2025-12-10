@@ -95,8 +95,10 @@ def get_default_config(type_scen):
         "total_otros_costos_inicial": otros_costos_ini,
         "otros_costos_mensuales": 100.0,
         
+        # Aunque estos parametros existen, la logica forzada de terreno los ignorara en la distribucion
         "rango_pago_terreno": [1, 60], 
-        "prioridad_terreno": False,      
+        "prioridad_terreno": True,      
+        
         "tasa_anual_uf": tasa_uf,
         "pct_deuda_pesos": 0,      
         "tasa_anual_clp": tasa_clp, 
@@ -133,9 +135,10 @@ def calcular_flujo(data):
     fin_obra = inicio_obra + duracion - 1
     
     saldo_inicial = data.get("saldo_inicial_uf", 0)
+    
+    # Nota: Rango y Prioridad se mantienen en config pero la logica de pago forzará Terreno Primero
     rango_terr = data.get("rango_pago_terreno", [1, 60])
     inicio_pago_t, fin_pago_t = rango_terr[0], rango_terr[1]
-    prioridad_t = data.get("prioridad_terreno", False)
     pagar_int_const = data.get("pagar_intereses_construccion", False)
     
     pct_clp = data["pct_deuda_pesos"] / 100.0
@@ -315,7 +318,7 @@ def calcular_flujo(data):
                 dinero_para_deuda += deficit 
                 egreso_equity_const += deficit 
         
-        # 4. PAGOS
+        # 4. PAGOS - LOGICA ESTRICTA: 1. Intereses, 2. Capital Terreno, 3. Capital Construccion
         es_mes_cierre = (m == ultimo_mes_venta)
         
         real_const_uf = saldo_const_uf + (saldo_const_clp_nominal / factor_uf)
@@ -333,26 +336,25 @@ def calcular_flujo(data):
                 monto_a_pagar_banco = min(deuda_banco_total, dinero_para_deuda) if dinero_para_deuda > 0 else 0
             
             if monto_a_pagar_banco > 0:
+                # 1. Pago Intereses (Prioridad Absoluta dentro del banco)
                 pago_banco_interes = min(monto_a_pagar_banco, int_banco_mes_en_uf)
                 if pagar_int_const and pago_banco_interes < int_banco_mes_en_uf and monto_a_pagar_banco >= int_banco_mes_en_uf:
                     pago_banco_interes = int_banco_mes_en_uf
 
+                # Capital disponible tras pagar intereses
                 pago_banco_capital = monto_a_pagar_banco - pago_banco_interes
                 
-                es_rango_terreno = (m >= inicio_pago_t and m <= fin_pago_t)
+                # --- DISTRIBUCIÓN DE CAPITAL (Lógica Estricta) ---
                 p_terr, p_const = 0, 0
                 
-                if es_rango_terreno:
-                    if prioridad_t:
-                        p_terr = min(real_terr_uf, monto_a_pagar_banco)
-                        p_const = min(real_const_uf, monto_a_pagar_banco - p_terr)
-                    else:
-                        if deuda_banco_total > 0:
-                            p_terr = monto_a_pagar_banco * (real_terr_uf / deuda_banco_total)
-                            p_const = monto_a_pagar_banco * (real_const_uf / deuda_banco_total)
-                else:
-                    p_const = min(real_const_uf, monto_a_pagar_banco)
+                if pago_banco_capital > 0:
+                    # 2. Pago Capital Terreno (Todo lo posible)
+                    p_terr = min(real_terr_uf, pago_banco_capital)
+                    
+                    # 3. Pago Capital Construcción (El remanente)
+                    p_const = pago_banco_capital - p_terr
                 
+                # Aplicación de pagos a saldos
                 if p_terr > 0 and real_terr_uf > 0:
                     prop = p_terr / real_terr_uf
                     if es_mes_cierre and p_terr >= real_terr_uf - 0.1: 
@@ -556,9 +558,11 @@ with col_inputs:
                 data["inflacion_anual"] = c3.number_input("Infl. %", value=data["inflacion_anual"], step=0.1, key=f"{scen_key}_inf")
                 data["pagar_intereses_construccion"] = st.checkbox("Pagar intereses durante construcción (Equity)", value=data.get("pagar_intereses_construccion", False), key=f"{scen_key}_pay_int")
                 st.markdown("**Pago Terreno**")
+                # Nota visual solamente, logica forzada en codigo
+                st.caption("Nota: El modelo prioriza automáticamente el pago total del Terreno cuando hay ingresos por ventas.")
                 rango_val = data.get("rango_pago_terreno", [1, 60])
-                data["rango_pago_terreno"] = st.slider("Ventana Pago", 1, 60, (rango_val[0], rango_val[1]), key=f"{scen_key}_rng")
-                data["prioridad_terreno"] = st.checkbox("Prioridad Terreno", value=data.get("prioridad_terreno", False), key=f"{scen_key}_prio")
+                data["rango_pago_terreno"] = st.slider("Ventana Pago (Referencial)", 1, 60, (rango_val[0], rango_val[1]), key=f"{scen_key}_rng")
+                data["prioridad_terreno"] = st.checkbox("Prioridad Terreno (Activado)", value=True, disabled=True, key=f"{scen_key}_prio_vis")
 
             with st.expander(f"🤝 Deuda Privada (KPs y Relac.){lbl_suffix}", expanded=is_expanded):
                 st.markdown("##### Préstamo Relacionada")
@@ -614,11 +618,11 @@ with col_inputs:
                     data["plan_ventas"].append({"mes": last_mes + 1, "pct": max(0.0, 100.0 - total_pct)})
                     st.rerun()
                 
-                # --- NUEVOS ENCABEZADOS (Labels) ---
                 st.markdown("---")
                 ch1, ch2, ch3 = st.columns([1.5, 1.5, 0.5])
                 ch1.markdown("**Mes Recupero:**")
-                ch2.markdown("**Porcentaje de recupero:**")
+                color_total = "green" if abs(total_pct - 100.0) < 0.01 else "red"
+                ch2.markdown(f"**Porcentaje de recupero (:{color_total}[Total: {total_pct:.1f}%]):**")
                 
                 idx_v_rem = []
                 for i, r in enumerate(lista_ventas):
