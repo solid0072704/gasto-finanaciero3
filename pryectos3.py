@@ -8,7 +8,7 @@ st.set_page_config(page_title="Evaluación Inmobiliaria Pro", layout="wide", pag
 # --- 0. LIMPIEZA DE CACHÉ AUTOMÁTICA ---
 if 'data_scenarios' in st.session_state:
     try:
-        # Verificamos si existe la nueva clave en el diccionario
+        # Verificamos si existe la nueva clave
         test_key = st.session_state.data_scenarios["Real"].get("pct_avance_inicial")
         if test_key is None: 
             raise KeyError
@@ -223,7 +223,7 @@ def calcular_flujo(data):
         "Deuda Total": (saldo_const_uf + saldo_terr_uf) + (saldo_const_clp_nominal + saldo_terr_clp_nominal) + saldo_total_rel + saldo_total_kps,
         "Ingresos": 0.0, "Ingresos Deuda": ingreso_deuda_mes_0, "Otros Costos (Op)": 0.0,
         "Int. Banco": 0.0, "Int. KPs": 0.0, 
-        "Int. Relac.": 0.0, # IMPORTANTE: Nombre con punto al final
+        "Int. Relac.": 0.0,
         "Devengado Banco": 0.0, "Devengado KPs": 0.0, "Devengado Relac.": 0.0,
         "Pago Intereses Total": 0.0, "Pago Capital": 0.0,
         "Inversión (Equity)": inversion_inicial, "Flujo Neto": flujo_neto_ini, "Flujo Acumulado": flujo_neto_ini
@@ -253,33 +253,15 @@ def calcular_flujo(data):
                 kp["saldo"] += kp["monto_total"]
                 ingreso_deuda_este_mes += kp["monto_total"]
         
-        # 1. GENERACIÓN DE DEUDA BANCARIA (GIROS)
-        # === LÓGICA DE DISTRIBUCIÓN COSTO CONSTRUCCIÓN ===
-        egreso_equity_const = 0
+        # 1. CÁLCULO DE INTERESES (LOGICA EXCEL: PRIMERO INTERES SOBRE SALDO INICIAL)
         
-        if m >= inicio_obra and m <= fin_obra:
-            if m == inicio_obra:
-                if duracion == 1:
-                     costo_mes_total = v_cont
-                else:
-                     costo_mes_total = v_cont * pct_avance_inicial
-            else:
-                pct_restante = 1.0 - pct_avance_inicial
-                remanente = v_cont * pct_restante
-                meses_restantes = duracion - 1
-                costo_mes_total = remanente / meses_restantes if meses_restantes > 0 else 0
-            
-            giro_banco = costo_mes_total * pct_fin_const
-            egreso_equity_const = costo_mes_total - giro_banco 
-            saldo_const_uf += giro_banco * pct_uf
-            saldo_const_clp_nominal += (giro_banco * pct_clp) * factor_uf 
-
-        # 2. INTERESES DEVENGADOS
         # A. Banco
         int_uf_mes = (saldo_const_uf + saldo_terr_uf) * tasa_mensual_uf
         if m == 1: saldo_terr_clp_nominal *= 1.0 
         int_clp_nom_mes = (saldo_const_clp_nominal + saldo_terr_clp_nominal) * tasa_mensual_clp
         int_banco_mes_en_uf = int_uf_mes + (int_clp_nom_mes / factor_uf)
+        
+        # Devengamos (Sumamos al saldo) antes de girar lo nuevo
         saldo_const_uf += int_uf_mes
         saldo_const_clp_nominal += int_clp_nom_mes
         interes_acum_banco_total += int_banco_mes_en_uf
@@ -328,6 +310,29 @@ def calcular_flujo(data):
                     rel["saldo"] += ir
                 total_interes_rel_exigible_hoy += interes_exigible_este_rel
         interes_acum_relacionada += int_rel_mes
+
+        # 2. GENERACIÓN DE DEUDA BANCARIA (GIROS - SEGUNDO PASO)
+        # === LÓGICA DE DISTRIBUCIÓN COSTO CONSTRUCCIÓN ===
+        egreso_equity_const = 0
+        
+        if m >= inicio_obra and m <= fin_obra:
+            if m == inicio_obra:
+                if duracion == 1:
+                     costo_mes_total = v_cont
+                else:
+                     costo_mes_total = v_cont * pct_avance_inicial
+            else:
+                pct_restante = 1.0 - pct_avance_inicial
+                remanente = v_cont * pct_restante
+                meses_restantes = duracion - 1
+                costo_mes_total = remanente / meses_restantes if meses_restantes > 0 else 0
+            
+            giro_banco = costo_mes_total * pct_fin_const
+            egreso_equity_const = costo_mes_total - giro_banco 
+            
+            # EL GIRO SE SUMA AL FINAL (No genera interés este mes)
+            saldo_const_uf += giro_banco * pct_uf
+            saldo_const_clp_nominal += (giro_banco * pct_clp) * factor_uf 
         
         # 3. FLUJO OPERATIVO
         ingreso_uf = sum([r["Monto"] for r in recuperos if r["Mes"] == m])
@@ -520,7 +525,7 @@ def calcular_flujo(data):
             
             "Int. Banco": pago_banco_interes,
             "Int. KPs": pago_kps_interes,
-            "Int. Relac.": pago_rel_interes, # AQUI ESTABA EL ERROR (Faltaba punto) - CORREGIDO
+            "Int. Relac.": pago_rel_interes, # AQUI ESTABA EL ERROR CORREGIDO (CON PUNTO)
             
             "Devengado Banco": int_banco_mes_en_uf,
             "Devengado KPs": int_kps_generado_mes,
