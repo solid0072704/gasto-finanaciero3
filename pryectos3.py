@@ -9,10 +9,6 @@ st.set_page_config(page_title="Evaluación Inmobiliaria Pro", layout="wide", pag
 if 'data_scenarios' in st.session_state:
     try:
         test_key = st.session_state.data_scenarios["Real"].get("pct_avance_inicial")
-        # Si ya existe la estructura pero queremos forzar el reinicio a 0 si el usuario recarga:
-        # (Opcional: Si deseas que persista la data al recargar, comenta las siguientes 2 lineas)
-        # if test_key is not None:
-        #    pass 
         if test_key is None: 
             raise KeyError
     except KeyError:
@@ -70,13 +66,13 @@ if 'exp_reset_token' not in st.session_state:
     st.session_state.exp_reset_token = 0
 
 def get_default_config(type_scen):
-    # Inicializamos TODO en 0 o vacío, sin importar el escenario
+    # Inicializamos TODO en 0 o vacío
     return {
         "valor_terreno": 0.0,
         "pct_fin_terreno": 0.0,
         "valor_contrato": 0.0,
         "pct_fin_construccion": 0.0,
-        "duracion_obra": 0, # Inicia en 0
+        "duracion_obra": 0, 
         "mes_inicio_obra": 0,
         "pct_avance_inicial": 0.0, 
         "mes_recepcion": 0,
@@ -89,19 +85,19 @@ def get_default_config(type_scen):
         "otros_costos_mensuales": 0.0,
         "otros_costos_pagados_anteriores": 0.0,
         
-        "rango_pago_terreno": [1, 60], # Mantenemos rango técnico por defecto del slider
+        "rango_pago_terreno": [1, 60], 
         "prioridad_terreno": False,      
         "tasa_anual_uf": 0.0,
-        "pct_deuda_pesos": 0,      
+        "pct_deuda_pesos": 0.0, # Float para consistencia
         "tasa_anual_clp": 0.0, 
         "inflacion_anual": 0.0,
         "pagar_intereses_construccion": False,
 
-        "lista_relacionadas": [], # Lista vacía
-        "lista_kps": [], # Lista vacía
+        "lista_relacionadas": [], 
+        "lista_kps": [], 
         
         "valor_venta_total": 0.0,
-        "plan_ventas": [] # Lista vacía
+        "plan_ventas": [] 
     }
 
 if 'data_scenarios' not in st.session_state:
@@ -122,7 +118,6 @@ def calcular_flujo(data):
     pct_avance_inicial = data.get("pct_avance_inicial", 0.0) / 100.0
     recepcion = int(data["mes_recepcion"])
     
-    # Validación: Si duración es 0, fin de obra es inicio - 1 (para que el bucle no entre)
     fin_obra = (inicio_obra + duracion - 1) if duracion > 0 else -1
     
     saldo_inicial = data.get("saldo_inicial_uf", 0)
@@ -176,13 +171,11 @@ def calcular_flujo(data):
     horizonte = recepcion + 12
     if recuperos:
         horizonte = max(horizonte, max([r["Mes"] for r in recuperos]) + 6)
-    # Ajuste horizonte si hay obra definida, sino minimo
     horizonte = max(horizonte, fin_obra + 6)
-    if horizonte < 12: horizonte = 12 # Minimo por defecto para mostrar algo
+    if horizonte < 12: horizonte = 12
         
     flujo = []
     
-    # --- MES 0 ---
     equity_terreno = v_terr * (1 - pct_fin_terr)
     inversion_inicial = equity_terreno + v_otros_inicial
     ingreso_deuda_mes_0 = 0.0
@@ -284,8 +277,6 @@ def calcular_flujo(data):
 
         # 2. GIROS CONSTRUCCIÓN (Al final)
         egreso_equity_const = 0
-        
-        # Validamos que duracion > 0 para entrar a esta logica
         if duracion > 0 and m >= inicio_obra and m <= fin_obra:
             if m == inicio_obra:
                 costo_mes_total = v_cont if duracion == 1 else v_cont * pct_avance_inicial
@@ -338,7 +329,6 @@ def calcular_flujo(data):
 
                 pago_banco_capital = monto_a_pagar_banco - pago_banco_interes
                 
-                # Modificación: Pagar siempre capital terreno primero si sobra dinero
                 p_terr, p_const = 0, 0
                 if pago_banco_capital > 0:
                     p_terr = min(real_terr_uf, pago_banco_capital)
@@ -475,7 +465,6 @@ def calcular_flujo(data):
     
     df = pd.DataFrame(flujo)
     costo_fin_total = interes_acum_banco_total + interes_acum_kps + interes_acum_relacionada
-    # ACA SE SUMAN LOS COSTOS HUNDIDOS AL COSTO TOTAL DEL PROYECTO
     costo_proyecto_total = v_terr + v_cont + v_otros_inicial + total_otros_costos_operativos + costo_fin_total + v_otros_anteriores
     utilidad = data["valor_venta_total"] - costo_proyecto_total
     roi = (utilidad / costo_proyecto_total) * 100 if costo_proyecto_total > 0 else 0
@@ -519,9 +508,10 @@ with col_inputs:
         with st.container():
             with st.expander(f"🏗️ Proyecto Base & Costos{lbl_suffix}", expanded=is_expanded):
                 data["valor_terreno"] = st.number_input("Valor Terreno (UF)", value=data["valor_terreno"], key=f"{scen_key}_vt")
-                data["pct_fin_terreno"] = st.slider("% Fin. Terreno", 0, 100, data["pct_fin_terreno"], key=f"{scen_key}_fin_t")
+                # Importante: Slider con float limits 0.0 a 100.0 para evitar errores de tipo
+                data["pct_fin_terreno"] = st.slider("% Fin. Terreno", 0.0, 100.0, float(data["pct_fin_terreno"]), key=f"{scen_key}_fin_t")
                 data["valor_contrato"] = st.number_input("Costo Const. (UF)", value=data["valor_contrato"], key=f"{scen_key}_vc")
-                data["pct_fin_construccion"] = st.slider("% Fin. Construcción", 0, 100, data["pct_fin_construccion"], key=f"{scen_key}_fin_c")
+                data["pct_fin_construccion"] = st.slider("% Fin. Construcción", 0.0, 100.0, float(data["pct_fin_construccion"]), key=f"{scen_key}_fin_c")
                 data["pct_avance_inicial"] = st.slider("% Avance 1er Mes (Giro Inicial)", 0.0, 100.0, float(data.get("pct_avance_inicial", 0.0)), key=f"{scen_key}_pinit")
                 
                 c_obra, c_ini, c_recep = st.columns(3)
@@ -543,7 +533,7 @@ with col_inputs:
                 data["otros_costos_pagados_anteriores"] = st.number_input("Costos Históricos Ya Pagados (No Financieros)", value=data.get("otros_costos_pagados_anteriores", 0.0), help="Costos hundidos (proyectos, permisos pagados anteriormente). No afectan el flujo de caja actual, solo la utilidad.", key=f"{scen_key}_cost_ant")
 
             with st.expander(f"🏦 Deuda Bancaria{lbl_suffix}", expanded=is_expanded):
-                data["pct_deuda_pesos"] = st.slider("% Deuda CLP", 0, 100, data["pct_deuda_pesos"], key=f"{scen_key}_mix")
+                data["pct_deuda_pesos"] = st.slider("% Deuda CLP", 0.0, 100.0, float(data["pct_deuda_pesos"]), key=f"{scen_key}_mix")
                 c1, c2, c3 = st.columns(3)
                 data["tasa_anual_uf"] = c1.number_input("Tasa UF", value=data["tasa_anual_uf"], step=0.1, key=f"{scen_key}_tuf")
                 data["tasa_anual_clp"] = c2.number_input("Tasa CLP", value=data["tasa_anual_clp"], step=0.1, key=f"{scen_key}_tclp")
@@ -686,7 +676,7 @@ with col_dash:
             "Otros Costos (Op)": st.column_config.TextColumn("Otros Costos"),
             "Int. Banco": st.column_config.TextColumn("Int. Banco (Pagado)"),
             "Int. KPs": st.column_config.TextColumn("Int. KPs (Pagado)"),
-            "Int. Relac.": st.column_config.TextColumn("Int. Relac. (Pagado)"),
+            "Int. Relac.": st.column_config.TextColumn("Int. Relac. (Pagado)"), # CON PUNTO
             "Pago Capital": st.column_config.TextColumn("Capital"),
             "Flujo Neto": st.column_config.TextColumn("Flujo Neto"),
             "Flujo Acumulado": st.column_config.TextColumn("Acumulado"),
@@ -698,10 +688,10 @@ with col_dash:
     st.markdown("### 📍 Análisis de Intereses Acumulados por Hitos (Devengado Futuro)")
     
     params_real = st.session_state.data_scenarios["Real"]
-    mes_inicio_obra = int(params_real.get("mes_inicio_obra", 0))
-    duracion_obra = int(params_real.get("duracion_obra", 0))
-    mes_construccion = (mes_inicio_obra + duracion_obra - 1) if duracion_obra > 0 else 0
-    mes_recepcion = int(params_real.get("mes_recepcion", 0))
+    mes_inicio_obra = int(params_real.get("mes_inicio_obra", 1))
+    duracion_obra = int(params_real.get("duracion_obra", 18))
+    mes_construccion = mes_inicio_obra + duracion_obra - 1
+    mes_recepcion = int(params_real["mes_recepcion"])
     
     int_previos = st.session_state.data_scenarios["Real"].get("intereses_previos_uf", 0.0)
     
