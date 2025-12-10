@@ -51,6 +51,18 @@ def local_css():
         div[data-testid="stMetricValue"] { font-size: 34px !important; }
         div[data-testid="stMetricLabel"] { font-size: 18px !important; }
         .small-btn { margin-bottom: 10px; }
+
+        /* --- OCULTAR ELEMENTOS DE STREAMLIT (HEADER, MENU, FOOTER) --- */
+        #MainMenu {visibility: hidden;}
+        header {visibility: hidden;}
+        footer {visibility: hidden;}
+        [data-testid="stToolbar"] {visibility: hidden;}
+        .stDeployButton {display:none;}
+        
+        /* Ajustar el padding superior ya que no hay header */
+        .block-container {
+            padding-top: 1rem !important; 
+        }
     </style>
     """, unsafe_allow_html=True)
 
