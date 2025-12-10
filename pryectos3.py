@@ -558,7 +558,7 @@ with col_inputs:
                 st.caption("📋 Otros Costos No Financieros")
                 data["total_otros_costos_inicial"] = st.number_input("Otros Costos Iniciales (Permisos, Arq)", value=data.get("total_otros_costos_inicial", 0.0), key=f"{scen_key}_oci")
                 data["otros_costos_mensuales"] = st.number_input("Gasto Operativo Mensual (Admin, Ventas)", value=data.get("otros_costos_mensuales", 0.0), key=f"{scen_key}_ocm")
-                data["otros_costos_pagados_anteriores"] = st.number_input("Costos Históricos Ya Pagados (No Financieros)", value=data.get("otros_costos_pagados_anteriores", 0.0), help="Costos hundidos (proyectos, permisos pagados anteriormente). No afectan el flujo de caja actual, solo la utilidad.", key=f"{scen_key}_cost_ant")
+                data["otros_costos_pagados_anteriores"] = st.number_input("Costos Históricos Ya Pagados", value=data.get("otros_costos_pagados_anteriores", 0.0), help="Costos hundidos (proyectos, permisos pagados anteriormente). No afectan el flujo de caja actual, solo la utilidad.", key=f"{scen_key}_cost_ant")
 
             with st.expander(f"🏦 Deuda Bancaria{lbl_suffix}", expanded=is_expanded):
                 data["pct_deuda_pesos"] = st.slider("% Deuda CLP", 0, 100, data["pct_deuda_pesos"], key=f"{scen_key}_mix")
@@ -800,3 +800,4 @@ with col_dash:
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
+
