@@ -8,7 +8,8 @@ st.set_page_config(page_title="Evaluación Inmobiliaria Pro", layout="wide", pag
 # --- 0. LIMPIEZA DE CACHÉ AUTOMÁTICA ---
 if 'data_scenarios' in st.session_state:
     try:
-        test_key = st.session_state.data_scenarios["Real"].get("pct_avance_inicial")
+        # Verificamos si existe la nueva clave
+        test_key = st.session_state.data_scenarios["Real"].get("otros_costos_pagados_anteriores")
         if test_key is None: 
             raise KeyError
     except KeyError:
@@ -94,11 +95,10 @@ def get_default_config(type_scen):
         
         "total_otros_costos_inicial": otros_costos_ini,
         "otros_costos_mensuales": 100.0,
+        "otros_costos_pagados_anteriores": 0.0, # NUEVO CAMPO
         
-        # Aunque estos parametros existen, la logica forzada de terreno los ignorara en la distribucion
         "rango_pago_terreno": [1, 60], 
-        "prioridad_terreno": True,      
-        
+        "prioridad_terreno": False,      
         "tasa_anual_uf": tasa_uf,
         "pct_deuda_pesos": 0,      
         "tasa_anual_clp": tasa_clp, 
@@ -128,6 +128,9 @@ def calcular_flujo(data):
     v_otros_inicial = data.get("total_otros_costos_inicial", 0.0)
     v_otros_mensual = data.get("otros_costos_mensuales", 0.0)
     
+    # NUEVO: Costos hundidos no financieros
+    v_otros_anteriores = data.get("otros_costos_pagados_anteriores", 0.0)
+    
     duracion = int(data["duracion_obra"])
     inicio_obra = int(data.get("mes_inicio_obra", 1)) 
     pct_avance_inicial = data.get("pct_avance_inicial", 20.0) / 100.0
@@ -135,10 +138,9 @@ def calcular_flujo(data):
     fin_obra = inicio_obra + duracion - 1
     
     saldo_inicial = data.get("saldo_inicial_uf", 0)
-    
-    # Nota: Rango y Prioridad se mantienen en config pero la logica de pago forzará Terreno Primero
     rango_terr = data.get("rango_pago_terreno", [1, 60])
     inicio_pago_t, fin_pago_t = rango_terr[0], rango_terr[1]
+    prioridad_t = data.get("prioridad_terreno", False)
     pagar_int_const = data.get("pagar_intereses_construccion", False)
     
     pct_clp = data["pct_deuda_pesos"] / 100.0
@@ -318,7 +320,7 @@ def calcular_flujo(data):
                 dinero_para_deuda += deficit 
                 egreso_equity_const += deficit 
         
-        # 4. PAGOS - LOGICA ESTRICTA: 1. Intereses, 2. Capital Terreno, 3. Capital Construccion
+        # 4. PAGOS
         es_mes_cierre = (m == ultimo_mes_venta)
         
         real_const_uf = saldo_const_uf + (saldo_const_clp_nominal / factor_uf)
@@ -336,25 +338,31 @@ def calcular_flujo(data):
                 monto_a_pagar_banco = min(deuda_banco_total, dinero_para_deuda) if dinero_para_deuda > 0 else 0
             
             if monto_a_pagar_banco > 0:
-                # 1. Pago Intereses (Prioridad Absoluta dentro del banco)
                 pago_banco_interes = min(monto_a_pagar_banco, int_banco_mes_en_uf)
                 if pagar_int_const and pago_banco_interes < int_banco_mes_en_uf and monto_a_pagar_banco >= int_banco_mes_en_uf:
                     pago_banco_interes = int_banco_mes_en_uf
 
-                # Capital disponible tras pagar intereses
                 pago_banco_capital = monto_a_pagar_banco - pago_banco_interes
                 
-                # --- DISTRIBUCIÓN DE CAPITAL (Lógica Estricta) ---
+                es_rango_terreno = (m >= inicio_pago_t and m <= fin_pago_t)
                 p_terr, p_const = 0, 0
                 
-                if pago_banco_capital > 0:
-                    # 2. Pago Capital Terreno (Todo lo posible)
-                    p_terr = min(real_terr_uf, pago_banco_capital)
-                    
-                    # 3. Pago Capital Construcción (El remanente)
-                    p_const = pago_banco_capital - p_terr
+                if es_rango_terreno:
+                    if prioridad_t:
+                        p_terr = min(real_terr_uf, monto_a_pagar_banco)
+                        p_const = min(real_const_uf, monto_a_pagar_banco - p_terr)
+                    else:
+                        if deuda_banco_total > 0:
+                            p_terr = monto_a_pagar_banco * (real_terr_uf / deuda_banco_total)
+                            p_const = monto_a_pagar_banco * (real_const_uf / deuda_banco_total)
+                else:
+                    p_const = min(real_const_uf, monto_a_pagar_banco)
                 
-                # Aplicación de pagos a saldos
+                # Modificación: Pagar siempre capital terreno primero si sobra dinero
+                if pago_banco_capital > 0:
+                    p_terr = min(real_terr_uf, pago_banco_capital)
+                    p_const = pago_banco_capital - p_terr
+
                 if p_terr > 0 and real_terr_uf > 0:
                     prop = p_terr / real_terr_uf
                     if es_mes_cierre and p_terr >= real_terr_uf - 0.1: 
@@ -486,7 +494,8 @@ def calcular_flujo(data):
     
     df = pd.DataFrame(flujo)
     costo_fin_total = interes_acum_banco_total + interes_acum_kps + interes_acum_relacionada
-    costo_proyecto_total = v_terr + v_cont + v_otros_inicial + total_otros_costos_operativos + costo_fin_total
+    # ACA SE SUMAN LOS COSTOS HUNDIDOS AL COSTO TOTAL DEL PROYECTO
+    costo_proyecto_total = v_terr + v_cont + v_otros_inicial + total_otros_costos_operativos + costo_fin_total + v_otros_anteriores
     utilidad = data["valor_venta_total"] - costo_proyecto_total
     roi = (utilidad / costo_proyecto_total) * 100 if costo_proyecto_total > 0 else 0
 
@@ -549,6 +558,7 @@ with col_inputs:
                 st.caption("📋 Otros Costos No Financieros")
                 data["total_otros_costos_inicial"] = st.number_input("Otros Costos Iniciales (Permisos, Arq)", value=data.get("total_otros_costos_inicial", 0.0), key=f"{scen_key}_oci")
                 data["otros_costos_mensuales"] = st.number_input("Gasto Operativo Mensual (Admin, Ventas)", value=data.get("otros_costos_mensuales", 0.0), key=f"{scen_key}_ocm")
+                data["otros_costos_pagados_anteriores"] = st.number_input("Costos Históricos Ya Pagados (No Financieros)", value=data.get("otros_costos_pagados_anteriores", 0.0), help="Costos hundidos (proyectos, permisos pagados anteriormente). No afectan el flujo de caja actual, solo la utilidad.", key=f"{scen_key}_cost_ant")
 
             with st.expander(f"🏦 Deuda Bancaria{lbl_suffix}", expanded=is_expanded):
                 data["pct_deuda_pesos"] = st.slider("% Deuda CLP", 0, 100, data["pct_deuda_pesos"], key=f"{scen_key}_mix")
@@ -558,7 +568,6 @@ with col_inputs:
                 data["inflacion_anual"] = c3.number_input("Infl. %", value=data["inflacion_anual"], step=0.1, key=f"{scen_key}_inf")
                 data["pagar_intereses_construccion"] = st.checkbox("Pagar intereses durante construcción (Equity)", value=data.get("pagar_intereses_construccion", False), key=f"{scen_key}_pay_int")
                 st.markdown("**Pago Terreno**")
-                # Nota visual solamente, logica forzada en codigo
                 st.caption("Nota: El modelo prioriza automáticamente el pago total del Terreno cuando hay ingresos por ventas.")
                 rango_val = data.get("rango_pago_terreno", [1, 60])
                 data["rango_pago_terreno"] = st.slider("Ventana Pago (Referencial)", 1, 60, (rango_val[0], rango_val[1]), key=f"{scen_key}_rng")
