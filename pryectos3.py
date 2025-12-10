@@ -395,16 +395,11 @@ def calcular_flujo(data):
         
         if saldo_total_kps_contable > 0:
             if es_mes_cierre:
-                # Pagamos todo (Interés exigible hoy + Capital + Interés no devengado si hubiera)
-                # Simplificación: Saldo contable incluye todo el interés devengado acumulado en 'saldo'
+                # Pagamos todo
                 monto_total_kp_pagar = saldo_total_kps_contable
-                
-                # Asumimos que todo el saldo se liquida
-                pago_kps_interes = 0 # Referencial visual
+                pago_kps_interes = 0 
                 pago_kps_total = monto_total_kp_pagar
-                
                 for kp in kps_activos: kp["saldo"] = 0
-                
                 dinero_para_deuda -= pago_kps_total
             
             elif dinero_para_deuda > 0:
@@ -752,31 +747,38 @@ with col_dash:
     mes_construccion = mes_inicio_obra + duracion_obra - 1
     mes_recepcion = int(params_real["mes_recepcion"])
     
+    # 1. Recuperamos el Interés Histórico
+    int_previos = st.session_state.data_scenarios["Real"].get("intereses_previos_uf", 0.0)
+    
     df_real = res["df"]
     try:
         mes_ultimo_recupero = df_real[df_real["Ingresos"] > 0].iloc[-1]["Mes"]
     except IndexError:
         mes_ultimo_recupero = mes_recepcion 
     mes_ultimo_recupero = int(mes_ultimo_recupero)
-    mes_fin_simulacion = df_real["Mes"].max()
 
     milestones = [
         {"nombre": "Término Construcción", "mes": mes_construccion},
         {"nombre": "Recepción Final", "mes": mes_recepcion},
-        {"nombre": "Último Recupero (Cierre Deuda)", "mes": mes_ultimo_recupero},
-        {"nombre": "Fin Simulación (Cierre)", "mes": mes_fin_simulacion}
+        {"nombre": "Último Recupero (Cierre Deuda)", "mes": mes_ultimo_recupero}
     ]
     
     milestone_data = []
-    total_costo_simulacion = res["costo_financiero_total"]
+    # 2. El total base para los porcentajes incluye lo histórico
+    total_costo_global = res["costo_financiero_total"] + int_previos
     
     for ms in milestones:
         df_cut = df_real[df_real["Mes"] <= ms["mes"]]
-        acum_banco = df_cut["Devengado Banco"].sum()
+        
+        # 3. Sumamos el histórico al acumulado del banco
+        acum_banco = df_cut["Devengado Banco"].sum() + int_previos
         acum_kps = df_cut["Devengado KPs"].sum()
         acum_relac = df_cut["Devengado Relac."].sum() 
+        
         total_acum = acum_banco + acum_kps + acum_relac
-        pct_avance = (total_acum / total_costo_simulacion * 100) if total_costo_simulacion > 0 else 0
+        
+        pct_avance = (total_acum / total_costo_global * 100) if total_costo_global > 0 else 0
+        
         milestone_data.append({
             "Hito": f"{ms['nombre']} (Mes {ms['mes']})",
             "Acum. Banco": fmt_nums(acum_banco),
@@ -831,4 +833,3 @@ with col_dash:
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
-
