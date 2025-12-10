@@ -8,7 +8,8 @@ st.set_page_config(page_title="Evaluación Inmobiliaria Pro", layout="wide", pag
 # --- 0. LIMPIEZA DE CACHÉ AUTOMÁTICA ---
 if 'data_scenarios' in st.session_state:
     try:
-        test_key = st.session_state.data_scenarios["Real"].get("mes_inicio_obra")
+        # Verificamos si existe la nueva clave en el diccionario
+        test_key = st.session_state.data_scenarios["Real"].get("pct_avance_inicial")
         if test_key is None: 
             raise KeyError
     except KeyError:
@@ -85,7 +86,11 @@ def get_default_config(type_scen):
         "valor_contrato": constr,
         "pct_fin_construccion": 80,
         "duracion_obra": 18,
-        "mes_inicio_obra": 1, 
+        "mes_inicio_obra": 1,
+        
+        # NUEVO PARÁMETRO: % del contrato que se gasta el mes 1
+        "pct_avance_inicial": 20.0, 
+        
         "mes_recepcion": 22,
         
         "saldo_inicial_uf": 0.0, # Deuda Viva
@@ -131,6 +136,10 @@ def calcular_flujo(data):
     # Cronograma
     duracion = int(data["duracion_obra"])
     inicio_obra = int(data.get("mes_inicio_obra", 1)) 
+    
+    # Recuperamos el porcentaje inicial definido por el usuario (default 20%)
+    pct_avance_inicial = data.get("pct_avance_inicial", 20.0) / 100.0
+    
     recepcion = int(data["mes_recepcion"])
     fin_obra = inicio_obra + duracion - 1
     
@@ -244,9 +253,26 @@ def calcular_flujo(data):
                 ingreso_deuda_este_mes += kp["monto_total"]
         
         # 1. GENERACIÓN DE DEUDA BANCARIA (GIROS)
+        # === LÓGICA DE DISTRIBUCIÓN COSTO CONSTRUCCIÓN ===
         egreso_equity_const = 0
+        
         if m >= inicio_obra and m <= fin_obra:
-            costo_mes_total = v_cont / duracion
+            
+            if m == inicio_obra:
+                # Primer mes: % definido por usuario (pct_avance_inicial)
+                # Si duracion es 1, se imputa el 100% o lo que diga el usuario,
+                # pero lógicamente debería ser el valor completo.
+                if duracion == 1:
+                     costo_mes_total = v_cont
+                else:
+                     costo_mes_total = v_cont * pct_avance_inicial
+            else:
+                # Meses restantes: El saldo (1 - %) dividido linealmente
+                pct_restante = 1.0 - pct_avance_inicial
+                remanente = v_cont * pct_restante
+                meses_restantes = duracion - 1
+                costo_mes_total = remanente / meses_restantes if meses_restantes > 0 else 0
+            
             giro_banco = costo_mes_total * pct_fin_const
             egreso_equity_const = costo_mes_total - giro_banco 
             saldo_const_uf += giro_banco * pct_uf
@@ -572,6 +598,7 @@ with col_inputs:
                 data["pct_fin_terreno"] = st.slider("% Fin. Terreno", 0, 100, data["pct_fin_terreno"], key=f"{scen_key}_fin_t")
                 data["valor_contrato"] = st.number_input("Costo Const. (UF)", value=data["valor_contrato"], key=f"{scen_key}_vc")
                 data["pct_fin_construccion"] = st.slider("% Fin. Construcción", 0, 100, data["pct_fin_construccion"], key=f"{scen_key}_fin_c")
+                data["pct_avance_inicial"] = st.slider("% Avance 1er Mes (Giro Inicial)", 0.0, 100.0, float(data.get("pct_avance_inicial", 20.0)), key=f"{scen_key}_pinit")
                 
                 c_obra, c_ini, c_recep = st.columns(3)
                 data["duracion_obra"] = c_obra.number_input("Meses Obra", value=data["duracion_obra"], key=f"{scen_key}_dur")
@@ -713,7 +740,7 @@ with col_dash:
             "Otros Costos (Op)": df_display["Otros Costos (Op)"].sum(),
             "Int. Banco": df_display["Int. Banco"].sum(),
             "Int. KPs": df_display["Int. KPs"].sum(),
-            "Int. Relac.": df_display["Int. Relac."].sum(),
+            "Int. Relac.": df_display["Int. Relac"].sum(),
             "Pago Capital": df_display["Pago Capital"].sum(),
             "Flujo Neto": df_display["Flujo Neto"].sum(),
             "Flujo Acumulado": df_display["Flujo Neto"].sum(), 
@@ -833,3 +860,4 @@ with col_dash:
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
+
