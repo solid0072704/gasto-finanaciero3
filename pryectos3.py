@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import io
+import copy
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Evaluación Inmobiliaria Pro", layout="wide", page_icon="🏢")
@@ -52,17 +54,13 @@ def local_css():
         div[data-testid="stMetricLabel"] { font-size: 18px !important; }
         .small-btn { margin-bottom: 10px; }
 
-        /* --- OCULTAR ELEMENTOS DE STREAMLIT (HEADER, MENU, FOOTER) --- */
+        /* --- OCULTAR ELEMENTOS DE STREAMLIT --- */
         #MainMenu {visibility: hidden;}
         header {visibility: hidden;}
         footer {visibility: hidden;}
         [data-testid="stToolbar"] {visibility: hidden;}
         .stDeployButton {display:none;}
-        
-        /* Ajustar el padding superior ya que no hay header */
-        .block-container {
-            padding-top: 1rem !important; 
-        }
+        .block-container { padding-top: 1rem !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -78,7 +76,19 @@ if 'exp_reset_token' not in st.session_state:
     st.session_state.exp_reset_token = 0
 
 def get_default_config(type_scen):
-    # Inicializamos TODO en 0 o vacío
+    if type_scen == "Optimista":
+        venta, tasa_uf, constr = 155000, 5.5, 68000
+        inflacion, tasa_clp = 3.0, 9.0
+        otros_costos_ini = 2500.0
+    elif type_scen == "Pesimista":
+        venta, tasa_uf, constr = 130000, 8.0, 75000
+        inflacion, tasa_clp = 6.0, 14.0
+        otros_costos_ini = 4000.0
+    else: # Real
+        venta, tasa_uf, constr = 140000, 6.5, 70000
+        inflacion, tasa_clp = 4.0, 11.0
+        otros_costos_ini = 3000.0
+        
     return {
         "valor_terreno": 0.0,
         "pct_fin_terreno": 0.0,
@@ -88,15 +98,12 @@ def get_default_config(type_scen):
         "mes_inicio_obra": 0,
         "pct_avance_inicial": 0.0, 
         "mes_recepcion": 0,
-        
         "saldo_inicial_uf": 0.0,
         "intereses_previos_uf": 0.0,
         "aporte_socios": 0.0,
-        
         "total_otros_costos_inicial": 0.0,
         "otros_costos_mensuales": 0.0,
         "otros_costos_pagados_anteriores": 0.0,
-        
         "rango_pago_terreno": [1, 60], 
         "prioridad_terreno": False,      
         "tasa_anual_uf": 0.0,
@@ -104,10 +111,8 @@ def get_default_config(type_scen):
         "tasa_anual_clp": 0.0, 
         "inflacion_anual": 0.0,
         "pagar_intereses_construccion": False,
-
         "lista_relacionadas": [], 
         "lista_kps": [], 
-        
         "valor_venta_total": 0.0,
         "plan_ventas": [] 
     }
@@ -122,14 +127,12 @@ def calcular_flujo(data):
     v_otros_inicial = data.get("total_otros_costos_inicial", 0.0)
     v_otros_mensual = data.get("otros_costos_mensuales", 0.0)
     v_otros_anteriores = data.get("otros_costos_pagados_anteriores", 0.0)
-    
     v_aporte_socios = data.get("aporte_socios", 0.0)
     
     duracion = int(data["duracion_obra"])
     inicio_obra = int(data.get("mes_inicio_obra", 0)) 
     pct_avance_inicial = data.get("pct_avance_inicial", 0.0) / 100.0
     recepcion = int(data["mes_recepcion"])
-    
     fin_obra = (inicio_obra + duracion - 1) if duracion > 0 else -1
     
     saldo_inicial = data.get("saldo_inicial_uf", 0)
@@ -188,7 +191,6 @@ def calcular_flujo(data):
         
     flujo = []
     
-    # --- MES 0 ---
     equity_terreno = v_terr * (1 - pct_fin_terr)
     inversion_inicial = equity_terreno + v_otros_inicial
     ingreso_deuda_mes_0 = 0.0
@@ -235,7 +237,6 @@ def calcular_flujo(data):
                 kp["saldo"] += kp["monto_total"]
                 ingreso_deuda_este_mes += kp["monto_total"]
         
-        # 1. CÁLCULO DE INTERESES (Saldo Inicial)
         int_uf_mes = (saldo_const_uf + saldo_terr_uf) * tasa_mensual_uf
         if m == 1: saldo_terr_clp_nominal *= 1.0 
         int_clp_nom_mes = (saldo_const_clp_nominal + saldo_terr_clp_nominal) * tasa_mensual_clp
@@ -288,7 +289,6 @@ def calcular_flujo(data):
                 total_interes_rel_exigible_hoy += interes_exigible_este_rel
         interes_acum_relacionada += int_rel_mes
 
-        # 2. GIROS CONSTRUCCIÓN (Al final)
         egreso_equity_const = 0
         if duracion > 0 and m >= inicio_obra and m <= fin_obra:
             if m == inicio_obra:
@@ -304,7 +304,6 @@ def calcular_flujo(data):
             saldo_const_uf += giro_banco * pct_uf
             saldo_const_clp_nominal += (giro_banco * pct_clp) * factor_uf 
         
-        # 3. FLUJO OPERATIVO
         ingreso_uf = sum([r["Monto"] for r in recuperos if r["Mes"] == m])
         gasto_operativo_mes = v_otros_mensual if (m <= recepcion + 6) else 0 
         total_otros_costos_operativos += gasto_operativo_mes
@@ -318,7 +317,6 @@ def calcular_flujo(data):
                 dinero_para_deuda += deficit 
                 egreso_equity_const += deficit 
         
-        # 4. PAGOS
         es_mes_cierre = (m == ultimo_mes_venta)
         
         real_const_uf = saldo_const_uf + (saldo_const_clp_nominal / factor_uf)
@@ -636,6 +634,28 @@ res = results["Real"]
 fmt_nums = lambda x: f"{x:,.0f}".replace(",", ".")
 
 with col_dash:
+    # --- FUNCIONALIDAD 2: BOTÓN EXCEL ---
+    # Creamos un buffer para guardar el excel
+    def to_excel(df_in):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df_in.to_excel(writer, index=False, sheet_name='Flujo')
+        return output.getvalue()
+
+    # Preparamos el dataframe para exportar (mismas columnas que la tabla)
+    cols_export = ["Mes", "Ingresos", "Ingresos Deuda", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
+    df_excel = res["df"][cols_export].copy()
+    
+    # Colocamos el botón al principio del dashboard
+    excel_data = to_excel(df_excel)
+    st.download_button(
+        label="📥 Descargar Flujo en Excel",
+        data=excel_data,
+        file_name="flujo_caja_inmobiliario.xlsx",
+        mime="application/vnd.ms-excel",
+        use_container_width=True
+    )
+    
     st.markdown("### 🏆 KPIs Escenario Real")
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Utilidad", f"{res['utilidad']:,.0f} UF")
@@ -660,8 +680,7 @@ with col_dash:
         st.markdown('</div>', unsafe_allow_html=True)
 
     with st.expander("📋 Tabla Detallada (Verificación de Pagos)", expanded=False):
-        cols_show = ["Mes", "Ingresos", "Ingresos Deuda", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
-        df_display = res["df"][cols_show].copy()
+        df_display = res["df"][cols_export].copy()
         df_display["Mes"] = df_display["Mes"].astype(str)
         total_row = {
             "Mes": "TOTAL",
@@ -677,22 +696,9 @@ with col_dash:
             "Deuda Total": 0.0 
         }
         df_final = pd.concat([df_display, pd.DataFrame([total_row])], ignore_index=True)
-        cols_nums = ["Ingresos", "Ingresos Deuda", "Otros Costos (Op)", "Int. Banco", "Int. KPs", "Int. Relac.", "Pago Capital", "Flujo Neto", "Flujo Acumulado", "Deuda Total"]
-        for col in cols_nums:
+        for col in cols_export[1:]: # Formatear todas menos Mes
             df_final[col] = df_final[col].apply(lambda x: f"{x:,.0f} UF".replace(",", ".") if pd.notnull(x) else "0 UF")
-        st.dataframe(df_final, use_container_width=True, height=400, column_config={
-            "Mes": st.column_config.TextColumn("Mes"),
-            "Ingresos": st.column_config.TextColumn("Ingresos"),
-            "Ingresos Deuda": st.column_config.TextColumn("Ingresos Deuda"), 
-            "Otros Costos (Op)": st.column_config.TextColumn("Otros Costos"),
-            "Int. Banco": st.column_config.TextColumn("Int. Banco (Pagado)"),
-            "Int. KPs": st.column_config.TextColumn("Int. KPs (Pagado)"),
-            "Int. Relac.": st.column_config.TextColumn("Int. Relac. (Pagado)"), # CON PUNTO
-            "Pago Capital": st.column_config.TextColumn("Capital"),
-            "Flujo Neto": st.column_config.TextColumn("Flujo Neto"),
-            "Flujo Acumulado": st.column_config.TextColumn("Acumulado"),
-            "Deuda Total": st.column_config.TextColumn("Deuda Viva"),
-        })
+        st.dataframe(df_final, use_container_width=True, height=400)
 
     # --- ANÁLISIS POR HITOS ---
     st.markdown("---")
@@ -743,34 +749,84 @@ with col_dash:
     # --- COMPARATIVA ---
     st.markdown("---")
     st.header("⚖️ Comparativa de Escenarios")
-    comp_data = []
+    
+    # --- FUNCIONALIDAD 5: COMPARADOR SIDE-BY-SIDE ---
+    fig_comp_line = go.Figure()
+    colors = {"Real": "#3B82F6", "Optimista": "#10B981", "Pesimista": "#EF4444"}
+    
     for sc in SCENARIOS:
         if sc in st.session_state.calc_results:
             r = st.session_state.calc_results[sc]
-            comp_data.append({
-                "Escenario": sc,
-                "Int. Banco (Dev.)": r["detalles_fin"]["banco"],
-                "Int. KPs (Dev.)": r["detalles_fin"]["kps"],
-                "Int. Relac. (Dev.)": r["detalles_fin"]["relacionada"],
-                "Total Intereses (Dev.)": r["costo_financiero_total"],
-                "Mes Break Even": r["break_even"] if r["break_even"] is not None else "N/A"
-            })
-    df_comp = pd.DataFrame(comp_data)
-    c_chart, c_table = st.columns([1.5, 1])
-    with c_chart:
-        st.subheader("Costos Financieros por Escenario (Devengado)")
-        fig_c = go.Figure()
-        fig_c.add_trace(go.Bar(name='Banco', x=df_comp['Escenario'], y=df_comp['Int. Banco (Dev.)'], marker_color='#3B82F6', text=df_comp['Int. Banco (Dev.)'].apply(fmt_nums), textposition='auto'))
-        fig_c.add_trace(go.Bar(name='KPs', x=df_comp['Escenario'], y=df_comp['Int. KPs (Dev.)'], marker_color='#A855F7', text=df_comp['Int. KPs (Dev.)'].apply(fmt_nums), textposition='auto'))
-        fig_c.add_trace(go.Bar(name='Relacionada', x=df_comp['Escenario'], y=df_comp['Int. Relac. (Dev.)'], marker_color='#F97316', text=df_comp['Int. Relac. (Dev.)'].apply(fmt_nums), textposition='auto'))
-        fig_c.update_layout(barmode='group', template="plotly_dark", height=350, legend_title="Tipo Interés", font=dict(size=15))
-        st.plotly_chart(fig_c, use_container_width=True)
-    with c_table:
-        st.subheader("Resumen Numérico")
-        df_show = df_comp.copy()
-        cols_num = ["Int. Banco (Dev.)", "Int. KPs (Dev.)", "Int. Relac. (Dev.)", "Total Intereses (Dev.)"]
-        for col in cols_num: df_show[col] = df_show[col].apply(fmt_nums)
-        st.dataframe(df_show, use_container_width=True, hide_index=True, height=350)
+            df_r = r["df"]
+            fig_comp_line.add_trace(go.Scatter(
+                x=df_r["Mes"], 
+                y=df_r["Flujo Acumulado"], 
+                name=sc, 
+                mode='lines',
+                line=dict(color=colors[sc], width=3)
+            ))
+            
+    fig_comp_line.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
+    fig_comp_line.update_layout(
+        title="Curvas de Flujo Acumulado",
+        template="plotly_dark", 
+        height=400,
+        legend_title="Escenario"
+    )
+    st.plotly_chart(fig_comp_line, use_container_width=True)
+
+    # --- FUNCIONALIDAD 1: ANÁLISIS DE SENSIBILIDAD ---
+    st.markdown("---")
+    st.header("🎯 Análisis de Sensibilidad (Stress Test)")
+    
+    with st.expander("Configurar Matriz de Sensibilidad", expanded=True):
+        col_sens1, col_sens2 = st.columns(2)
+        var_venta = col_sens1.slider("Variación Precio Venta (+/- %)", 1, 20, 10, key="sens_venta")
+        var_costo = col_sens2.slider("Variación Costo Construcción (+/- %)", 1, 20, 10, key="sens_costo")
+        
+        base_scenario = st.session_state.data_scenarios["Real"]
+        base_venta = base_scenario["valor_venta_total"]
+        base_costo_constr = base_scenario["valor_contrato"]
+        
+        steps_x = [-var_venta, -var_venta/2, 0, var_venta/2, var_venta]
+        steps_y = [-var_costo, -var_costo/2, 0, var_costo/2, var_costo]
+        
+        z_roi = []
+        y_labels = []
+        x_labels = []
+        
+        for dy in steps_y: 
+            row_roi = []
+            costo_sim = base_costo_constr * (1 + dy/100)
+            y_labels.append(f"Costo {dy:+.1f}%")
+            
+            for dx in steps_x:
+                venta_sim = base_venta * (1 + dx/100)
+                if len(y_labels) == 1:
+                    x_labels.append(f"Venta {dx:+.1f}%")
+                
+                temp_data = copy.deepcopy(base_scenario)
+                temp_data["valor_contrato"] = costo_sim
+                temp_data["valor_venta_total"] = venta_sim
+                
+                resultado = calcular_flujo(temp_data)
+                row_roi.append(resultado["roi"])
+                
+            z_roi.append(row_roi)
+
+        fig_sens = go.Figure(data=go.Heatmap(
+            z=z_roi, x=x_labels, y=y_labels,
+            texttemplate="%{z:.1f}%", textfont={"size": 14},
+            colorscale='RdYlGn', hoverongaps=False
+        ))
+        
+        fig_sens.update_layout(
+            title="Matriz de ROI (%)",
+            xaxis_title="Variación Precio Venta",
+            yaxis_title="Variación Costo Construcción",
+            height=500, template="plotly_dark"
+        )
+        st.plotly_chart(fig_sens, use_container_width=True)
 
     # --- GRÁFICOS VISUALES AL FINAL ---
     st.markdown("---")
