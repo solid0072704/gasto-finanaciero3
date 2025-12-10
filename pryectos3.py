@@ -88,7 +88,7 @@ def get_default_config(type_scen):
         "rango_pago_terreno": [1, 60], 
         "prioridad_terreno": False,      
         "tasa_anual_uf": 0.0,
-        "pct_deuda_pesos": 0.0, # Float para consistencia
+        "pct_deuda_pesos": 0.0, 
         "tasa_anual_clp": 0.0, 
         "inflacion_anual": 0.0,
         "pagar_intereses_construccion": False,
@@ -176,6 +176,7 @@ def calcular_flujo(data):
         
     flujo = []
     
+    # --- MES 0 ---
     equity_terreno = v_terr * (1 - pct_fin_terr)
     inversion_inicial = equity_terreno + v_otros_inicial
     ingreso_deuda_mes_0 = 0.0
@@ -506,9 +507,14 @@ with col_inputs:
         lbl_suffix = "\u200b" * st.session_state.exp_reset_token
         
         with st.container():
+            with st.expander(f"🏦 Estado Situación Inicial{lbl_suffix}", expanded=is_expanded):
+                c_sald1, c_sald2, c_sald3 = st.columns(3)
+                data["saldo_inicial_uf"] = c_sald1.number_input("Deuda Inicial (Capital Vivo)", value=data.get("saldo_inicial_uf", 0.0), help="Deuda vigente al mes 0. ESTO GENERA INTERESES.", key=f"{scen_key}_ini")
+                data["intereses_previos_uf"] = c_sald2.number_input("Intereses Ya Pagados (Histórico)", value=data.get("intereses_previos_uf", 0.0), help="Intereses pagados antes de este flujo. Solo suma al costo total.", key=f"{scen_key}_int_prev")
+                data["aporte_socios"] = c_sald3.number_input("Aporte Socios (Ingreso Inicial)", value=data.get("aporte_socios", 0.0), help="Aporte de capital de los socios al inicio (Mes 0). Ingresa a la caja, reduce necesidad de deuda futura, no es venta.", key=f"{scen_key}_aporte")
+
             with st.expander(f"🏗️ Proyecto Base & Costos{lbl_suffix}", expanded=is_expanded):
                 data["valor_terreno"] = st.number_input("Valor Terreno (UF)", value=data["valor_terreno"], key=f"{scen_key}_vt")
-                # Importante: Slider con float limits 0.0 a 100.0 para evitar errores de tipo
                 data["pct_fin_terreno"] = st.slider("% Fin. Terreno", 0.0, 100.0, float(data["pct_fin_terreno"]), key=f"{scen_key}_fin_t")
                 data["valor_contrato"] = st.number_input("Costo Const. (UF)", value=data["valor_contrato"], key=f"{scen_key}_vc")
                 data["pct_fin_construccion"] = st.slider("% Fin. Construcción", 0.0, 100.0, float(data["pct_fin_construccion"]), key=f"{scen_key}_fin_c")
@@ -518,13 +524,6 @@ with col_inputs:
                 data["duracion_obra"] = c_obra.number_input("Meses Obra", value=data["duracion_obra"], key=f"{scen_key}_dur")
                 data["mes_inicio_obra"] = c_ini.number_input("Mes Inicio Obra (Gantt)", value=data.get("mes_inicio_obra", 0), key=f"{scen_key}_ini_obra")
                 data["mes_recepcion"] = c_recep.number_input("Mes Recepción Final", value=data["mes_recepcion"], key=f"{scen_key}_recep")
-                
-                st.markdown("---")
-                st.caption("🏦 Estado Situación Inicial")
-                c_sald1, c_sald2, c_sald3 = st.columns(3)
-                data["saldo_inicial_uf"] = c_sald1.number_input("Deuda Inicial (Capital Vivo)", value=data.get("saldo_inicial_uf", 0.0), help="Deuda vigente al mes 0. ESTO GENERA INTERESES.", key=f"{scen_key}_ini")
-                data["intereses_previos_uf"] = c_sald2.number_input("Intereses Ya Pagados (Histórico)", value=data.get("intereses_previos_uf", 0.0), help="Intereses pagados antes de este flujo. Solo suma al costo total.", key=f"{scen_key}_int_prev")
-                data["aporte_socios"] = c_sald3.number_input("Aporte Socios (Ingreso Inicial)", value=data.get("aporte_socios", 0.0), help="Aporte de capital de los socios al inicio (Mes 0). Ingresa a la caja, reduce necesidad de deuda futura, no es venta.", key=f"{scen_key}_aporte")
                 
                 st.markdown("---")
                 st.caption("📋 Otros Costos No Financieros")
