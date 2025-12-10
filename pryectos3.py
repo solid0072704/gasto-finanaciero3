@@ -69,6 +69,10 @@ SCENARIOS = ["Real", "Optimista", "Pesimista"]
 if 'menu_expanded' not in st.session_state:
     st.session_state.menu_expanded = False
 
+# Token para forzar el redibujado de los expanders
+if 'exp_reset_token' not in st.session_state:
+    st.session_state.exp_reset_token = 0
+
 def get_default_config(type_scen):
     # Valores base
     if type_scen == "Optimista":
@@ -563,13 +567,19 @@ if 'calc_results' not in st.session_state:
 with col_inputs:
     st.markdown("### Configuración")
     
-    # --- LOGICA BOTONES EXPANDIR/CERRAR TODO ---
+    # --- 1. GESTIÓN DE ESTADO PARA EXPANDIR/COLAPSAR ---
     col_btn1, col_btn2 = st.columns(2)
+    
+    # Botón Expandir
     if col_btn1.button("🔽 Expandir Todo", key="btn_expand", use_container_width=True):
         st.session_state.menu_expanded = True
+        st.session_state.exp_reset_token += 1 # Cambiamos el token para forzar redibujado
         st.rerun()
+        
+    # Botón Colapsar
     if col_btn2.button("🔼 Colapsar Todo", key="btn_collapse", use_container_width=True):
         st.session_state.menu_expanded = False
+        st.session_state.exp_reset_token += 1 # Cambiamos el token para forzar redibujado
         st.rerun()
     
     # --- BOTÓN DE PROCESAR ---
@@ -584,8 +594,14 @@ with col_inputs:
         data = st.session_state.data_scenarios[scen_key]
         is_expanded = st.session_state.menu_expanded
         
+        # TRUCO: Generamos un sufijo invisible que cambia al pulsar los botones.
+        # Esto obliga al expander a reiniciarse y obedecer el estado 'is_expanded'.
+        # \u200b es un "Espacio de anchura cero".
+        lbl_suffix = "\u200b" * st.session_state.exp_reset_token
+        
         with st.container():
-            with st.expander("🏗️ Proyecto Base & Costos", expanded=is_expanded):
+            # Agregamos el sufijo invisible al título
+            with st.expander(f"🏗️ Proyecto Base & Costos{lbl_suffix}", expanded=is_expanded):
                 data["valor_terreno"] = st.number_input("Valor Terreno (UF)", value=data["valor_terreno"], key=f"{scen_key}_vt")
                 data["pct_fin_terreno"] = st.slider("% Fin. Terreno", 0, 100, data["pct_fin_terreno"], key=f"{scen_key}_fin_t")
                 data["valor_contrato"] = st.number_input("Costo Const. (UF)", value=data["valor_contrato"], key=f"{scen_key}_vc")
@@ -604,7 +620,7 @@ with col_inputs:
                 data["total_otros_costos_inicial"] = st.number_input("Otros Costos Iniciales (Permisos, Arq)", value=data.get("total_otros_costos_inicial", 0.0), key=f"{scen_key}_oci")
                 data["otros_costos_mensuales"] = st.number_input("Gasto Operativo Mensual (Admin, Ventas)", value=data.get("otros_costos_mensuales", 0.0), key=f"{scen_key}_ocm")
 
-            with st.expander("🏦 Deuda Bancaria", expanded=is_expanded):
+            with st.expander(f"🏦 Deuda Bancaria{lbl_suffix}", expanded=is_expanded):
                 data["pct_deuda_pesos"] = st.slider("% Deuda CLP", 0, 100, data["pct_deuda_pesos"], key=f"{scen_key}_mix")
                 
                 c1, c2, c3 = st.columns(3)
@@ -620,7 +636,7 @@ with col_inputs:
                 data["rango_pago_terreno"] = st.slider("Ventana Pago", 1, 60, (rango_val[0], rango_val[1]), key=f"{scen_key}_rng")
                 data["prioridad_terreno"] = st.checkbox("Prioridad Terreno", value=data.get("prioridad_terreno", False), key=f"{scen_key}_prio")
 
-            with st.expander("🤝 Deuda Privada (KPs y Relac.)", expanded=is_expanded):
+            with st.expander(f"🤝 Deuda Privada (KPs y Relac.){lbl_suffix}", expanded=is_expanded):
                 st.markdown("##### Préstamo Relacionada")
                 
                 if st.button("➕ Agregar Deuda Relacionada", key=f"add_rel_{scen_key}"):
@@ -675,7 +691,7 @@ with col_inputs:
                         data["lista_kps"].pop(i)
                     st.rerun()
 
-            with st.expander("💰 Plan de Ventas", expanded=is_expanded):
+            with st.expander(f"💰 Plan de Ventas{lbl_suffix}", expanded=is_expanded):
                 data["valor_venta_total"] = st.number_input("Venta Total (UF)", value=data["valor_venta_total"], key=f"{scen_key}_vvt")
                 lista_ventas = data["plan_ventas"]
                 total_pct = sum([item["pct"] for item in lista_ventas])
@@ -946,4 +962,3 @@ with col_dash:
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
-
