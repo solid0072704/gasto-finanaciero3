@@ -9,7 +9,7 @@ st.set_page_config(page_title="Evaluación Inmobiliaria Pro", layout="wide", pag
 if 'data_scenarios' in st.session_state:
     try:
         # Verificamos si existe la nueva clave
-        test_key = st.session_state.data_scenarios["Real"].get("otros_costos_pagados_anteriores")
+        test_key = st.session_state.data_scenarios["Real"].get("aporte_socios")
         if test_key is None: 
             raise KeyError
     except KeyError:
@@ -92,10 +92,11 @@ def get_default_config(type_scen):
         
         "saldo_inicial_uf": 0.0,
         "intereses_previos_uf": 0.0,
+        "aporte_socios": 0.0, # NUEVA VARIABLE: APORTE SOCIOS
         
         "total_otros_costos_inicial": otros_costos_ini,
         "otros_costos_mensuales": 100.0,
-        "otros_costos_pagados_anteriores": 0.0, # NUEVO CAMPO
+        "otros_costos_pagados_anteriores": 0.0,
         
         "rango_pago_terreno": [1, 60], 
         "prioridad_terreno": False,      
@@ -127,9 +128,10 @@ def calcular_flujo(data):
     v_cont = data["valor_contrato"]
     v_otros_inicial = data.get("total_otros_costos_inicial", 0.0)
     v_otros_mensual = data.get("otros_costos_mensuales", 0.0)
-    
-    # NUEVO: Costos hundidos no financieros
     v_otros_anteriores = data.get("otros_costos_pagados_anteriores", 0.0)
+    
+    # NUEVO: Aporte Socios
+    v_aporte_socios = data.get("aporte_socios", 0.0)
     
     duracion = int(data["duracion_obra"])
     inicio_obra = int(data.get("mes_inicio_obra", 1)) 
@@ -192,6 +194,7 @@ def calcular_flujo(data):
         
     flujo = []
     
+    # --- MES 0 ---
     equity_terreno = v_terr * (1 - pct_fin_terr)
     inversion_inicial = equity_terreno + v_otros_inicial
     ingreso_deuda_mes_0 = 0.0
@@ -200,18 +203,25 @@ def calcular_flujo(data):
     for rel in rel_activos:
         if rel["mes_inicio"] == 0: ingreso_deuda_mes_0 += rel["monto_total"]
             
-    flujo_neto_ini = -inversion_inicial + ingreso_deuda_mes_0
+    # APORTE SOCIOS: Se suma al flujo neto inicial (Entrada de Caja)
+    # No afecta Inversión (Equity requerido) ni Ingreso Deuda directamente, es un ítem aparte en el flujo.
+    flujo_neto_ini = -inversion_inicial + ingreso_deuda_mes_0 + v_aporte_socios
+    
     saldo_total_rel = sum(r['saldo'] for r in rel_activos)
     saldo_total_kps = sum(k['saldo'] for k in kps_activos)
 
     flujo.append({
         "Mes": 0,
         "Deuda Total": (saldo_const_uf + saldo_terr_uf) + (saldo_const_clp_nominal + saldo_terr_clp_nominal) + saldo_total_rel + saldo_total_kps,
-        "Ingresos": 0.0, "Ingresos Deuda": ingreso_deuda_mes_0, "Otros Costos (Op)": 0.0,
+        "Ingresos": 0.0, 
+        "Ingresos Deuda": ingreso_deuda_mes_0, 
+        "Otros Costos (Op)": 0.0,
         "Int. Banco": 0.0, "Int. KPs": 0.0, "Int. Relac.": 0.0,
         "Devengado Banco": 0.0, "Devengado KPs": 0.0, "Devengado Relac.": 0.0,
         "Pago Intereses Total": 0.0, "Pago Capital": 0.0,
-        "Inversión (Equity)": inversion_inicial, "Flujo Neto": flujo_neto_ini, "Flujo Acumulado": flujo_neto_ini
+        "Inversión (Equity)": inversion_inicial, 
+        "Flujo Neto": flujo_neto_ini, 
+        "Flujo Acumulado": flujo_neto_ini
     })
     
     interes_acum_banco_total = 0 
@@ -344,21 +354,8 @@ def calcular_flujo(data):
 
                 pago_banco_capital = monto_a_pagar_banco - pago_banco_interes
                 
-                es_rango_terreno = (m >= inicio_pago_t and m <= fin_pago_t)
-                p_terr, p_const = 0, 0
-                
-                if es_rango_terreno:
-                    if prioridad_t:
-                        p_terr = min(real_terr_uf, monto_a_pagar_banco)
-                        p_const = min(real_const_uf, monto_a_pagar_banco - p_terr)
-                    else:
-                        if deuda_banco_total > 0:
-                            p_terr = monto_a_pagar_banco * (real_terr_uf / deuda_banco_total)
-                            p_const = monto_a_pagar_banco * (real_const_uf / deuda_banco_total)
-                else:
-                    p_const = min(real_const_uf, monto_a_pagar_banco)
-                
                 # Modificación: Pagar siempre capital terreno primero si sobra dinero
+                p_terr, p_const = 0, 0
                 if pago_banco_capital > 0:
                     p_terr = min(real_terr_uf, pago_banco_capital)
                     p_const = pago_banco_capital - p_terr
@@ -550,15 +547,17 @@ with col_inputs:
                 
                 st.markdown("---")
                 st.caption("🏦 Estado Situación Inicial")
-                c_sald1, c_sald2 = st.columns(2)
+                # SE AJUSTA A 3 COLUMNAS PARA INCLUIR EL APORTE SOCIOS
+                c_sald1, c_sald2, c_sald3 = st.columns(3)
                 data["saldo_inicial_uf"] = c_sald1.number_input("Deuda Inicial (Capital Vivo)", value=data.get("saldo_inicial_uf", 0.0), help="Deuda vigente al mes 0. ESTO GENERA INTERESES.", key=f"{scen_key}_ini")
                 data["intereses_previos_uf"] = c_sald2.number_input("Intereses Ya Pagados (Histórico)", value=data.get("intereses_previos_uf", 0.0), help="Intereses pagados antes de este flujo. Solo suma al costo total.", key=f"{scen_key}_int_prev")
+                data["aporte_socios"] = c_sald3.number_input("Aporte Socios (Ingreso Inicial)", value=data.get("aporte_socios", 0.0), help="Aporte de capital de los socios al inicio (Mes 0). Ingresa a la caja, reduce necesidad de deuda futura, no es venta.", key=f"{scen_key}_aporte")
                 
                 st.markdown("---")
                 st.caption("📋 Otros Costos No Financieros")
                 data["total_otros_costos_inicial"] = st.number_input("Otros Costos Iniciales (Permisos, Arq)", value=data.get("total_otros_costos_inicial", 0.0), key=f"{scen_key}_oci")
                 data["otros_costos_mensuales"] = st.number_input("Gasto Operativo Mensual (Admin, Ventas)", value=data.get("otros_costos_mensuales", 0.0), key=f"{scen_key}_ocm")
-                data["otros_costos_pagados_anteriores"] = st.number_input("Costos Históricos Ya Pagados", value=data.get("otros_costos_pagados_anteriores", 0.0), help="Costos hundidos (proyectos, permisos pagados anteriormente). No afectan el flujo de caja actual, solo la utilidad.", key=f"{scen_key}_cost_ant")
+                data["otros_costos_pagados_anteriores"] = st.number_input("Costos Históricos Ya Pagados (No Financieros)", value=data.get("otros_costos_pagados_anteriores", 0.0), help="Costos hundidos (proyectos, permisos pagados anteriormente). No afectan el flujo de caja actual, solo la utilidad.", key=f"{scen_key}_cost_ant")
 
             with st.expander(f"🏦 Deuda Bancaria{lbl_suffix}", expanded=is_expanded):
                 data["pct_deuda_pesos"] = st.slider("% Deuda CLP", 0, 100, data["pct_deuda_pesos"], key=f"{scen_key}_mix")
@@ -800,4 +799,3 @@ with col_dash:
     fig_cash.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
     fig_cash.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=20, l=20, r=20), showlegend=True, font=dict(size=15))
     st.plotly_chart(fig_cash, use_container_width=True)
-
