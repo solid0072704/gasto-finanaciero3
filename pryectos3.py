@@ -8,7 +8,6 @@ st.set_page_config(page_title="Evaluación Inmobiliaria Pro", layout="wide", pag
 # --- 0. LIMPIEZA DE CACHÉ AUTOMÁTICA ---
 if 'data_scenarios' in st.session_state:
     try:
-        # Verificamos si existe la nueva clave
         test_key = st.session_state.data_scenarios["Real"].get("pct_avance_inicial")
         if test_key is None: 
             raise KeyError
@@ -87,14 +86,11 @@ def get_default_config(type_scen):
         "pct_fin_construccion": 80,
         "duracion_obra": 18,
         "mes_inicio_obra": 1,
-        
-        # PARAMETRO: % del contrato que se gasta el mes 1
         "pct_avance_inicial": 20.0, 
-        
         "mes_recepcion": 22,
         
-        "saldo_inicial_uf": 0.0, # Deuda Viva
-        "intereses_previos_uf": 0.0, # Sunk Cost
+        "saldo_inicial_uf": 0.0,
+        "intereses_previos_uf": 0.0,
         
         "total_otros_costos_inicial": otros_costos_ini,
         "otros_costos_mensuales": 100.0,
@@ -125,27 +121,18 @@ if 'data_scenarios' not in st.session_state:
 
 # --- 2. MOTOR DE CÁLCULO ---
 def calcular_flujo(data):
-    # Variables Generales
     v_terr = data["valor_terreno"]
     v_cont = data["valor_contrato"]
-    
-    # Costos No Financieros
     v_otros_inicial = data.get("total_otros_costos_inicial", 0.0)
     v_otros_mensual = data.get("otros_costos_mensuales", 0.0)
     
-    # Cronograma
     duracion = int(data["duracion_obra"])
     inicio_obra = int(data.get("mes_inicio_obra", 1)) 
-    
-    # Recuperamos el porcentaje inicial definido por el usuario (default 20%)
     pct_avance_inicial = data.get("pct_avance_inicial", 20.0) / 100.0
-    
     recepcion = int(data["mes_recepcion"])
     fin_obra = inicio_obra + duracion - 1
     
     saldo_inicial = data.get("saldo_inicial_uf", 0)
-    
-    # Config Deudas
     rango_terr = data.get("rango_pago_terreno", [1, 60])
     inicio_pago_t, fin_pago_t = rango_terr[0], rango_terr[1]
     prioridad_t = data.get("prioridad_terreno", False)
@@ -153,12 +140,10 @@ def calcular_flujo(data):
     
     pct_clp = data["pct_deuda_pesos"] / 100.0
     pct_uf = 1.0 - pct_clp
-    
     tasa_mensual_uf = (data["tasa_anual_uf"]/100) / 12
     tasa_mensual_clp = (data["tasa_anual_clp"]/100) / 12
     inflacion_mensual = ((1 + data["inflacion_anual"]/100)**(1/12)) - 1
     
-    # --- INICIALIZACIÓN DEUDA BANCARIA ---
     pct_fin_terr = data["pct_fin_terreno"]/100
     deuda_terr_total = v_terr * pct_fin_terr
     pct_fin_const = data["pct_fin_construccion"]/100
@@ -168,7 +153,6 @@ def calcular_flujo(data):
     saldo_const_uf = saldo_inicial * pct_uf
     saldo_const_clp_nominal = saldo_inicial * pct_clp 
     
-    # --- INICIALIZACIÓN DEUDA PRIVADA ---
     rel_activos = []
     for rel in data.get("lista_relacionadas", []):
         mes_ini_rel = int(rel.get("mes_inicio", 1))
@@ -188,14 +172,12 @@ def calcular_flujo(data):
             "frecuencia": kp.get("frecuencia_pago", "Mensual"), "acumulado_trimestre": 0, "interes_acumulado_hist": 0
         })
 
-    # Recuperos y Horizonte
     recuperos = []
     meses_con_venta = []
     for p in data["plan_ventas"]:
         recuperos.append({"Mes": int(p["mes"]), "Monto": data["valor_venta_total"] * (p["pct"]/100)})
         if p["pct"] > 0: meses_con_venta.append(int(p["mes"]))
     
-    # IDENTIFICAR EL ÚLTIMO MES DE VENTA (PARA FORZAR PAGO)
     ultimo_mes_venta = max(meses_con_venta) if meses_con_venta else -1
     
     horizonte = recepcion + 12
@@ -205,7 +187,6 @@ def calcular_flujo(data):
         
     flujo = []
     
-    # --- MES 0 ---
     equity_terreno = v_terr * (1 - pct_fin_terr)
     inversion_inicial = equity_terreno + v_otros_inicial
     ingreso_deuda_mes_0 = 0.0
@@ -222,8 +203,7 @@ def calcular_flujo(data):
         "Mes": 0,
         "Deuda Total": (saldo_const_uf + saldo_terr_uf) + (saldo_const_clp_nominal + saldo_terr_clp_nominal) + saldo_total_rel + saldo_total_kps,
         "Ingresos": 0.0, "Ingresos Deuda": ingreso_deuda_mes_0, "Otros Costos (Op)": 0.0,
-        "Int. Banco": 0.0, "Int. KPs": 0.0, 
-        "Int. Relac.": 0.0,
+        "Int. Banco": 0.0, "Int. KPs": 0.0, "Int. Relac.": 0.0,
         "Devengado Banco": 0.0, "Devengado KPs": 0.0, "Devengado Relac.": 0.0,
         "Pago Intereses Total": 0.0, "Pago Capital": 0.0,
         "Inversión (Equity)": inversion_inicial, "Flujo Neto": flujo_neto_ini, "Flujo Acumulado": flujo_neto_ini
@@ -242,7 +222,6 @@ def calcular_flujo(data):
     for m in range(1, horizonte + 1):
         factor_uf *= (1 + inflacion_mensual)
         
-        # 0. DEUDA PRIVADA ENTRADA
         ingreso_deuda_este_mes = 0.0
         for rel in rel_activos:
             if m == rel["mes_inicio"]:
@@ -253,20 +232,16 @@ def calcular_flujo(data):
                 kp["saldo"] += kp["monto_total"]
                 ingreso_deuda_este_mes += kp["monto_total"]
         
-        # 1. CÁLCULO DE INTERESES (LOGICA EXCEL: PRIMERO INTERES SOBRE SALDO INICIAL)
-        
-        # A. Banco
+        # 1. CÁLCULO DE INTERESES (Saldo Inicial)
         int_uf_mes = (saldo_const_uf + saldo_terr_uf) * tasa_mensual_uf
         if m == 1: saldo_terr_clp_nominal *= 1.0 
         int_clp_nom_mes = (saldo_const_clp_nominal + saldo_terr_clp_nominal) * tasa_mensual_clp
         int_banco_mes_en_uf = int_uf_mes + (int_clp_nom_mes / factor_uf)
         
-        # Devengamos (Sumamos al saldo) antes de girar lo nuevo
         saldo_const_uf += int_uf_mes
         saldo_const_clp_nominal += int_clp_nom_mes
         interes_acum_banco_total += int_banco_mes_en_uf
 
-        # B. KPs
         int_kps_generado_mes = 0 
         total_interes_kp_exigible_hoy = 0 
         for kp in kps_activos:
@@ -289,7 +264,6 @@ def calcular_flujo(data):
                 total_interes_kp_exigible_hoy += interes_exigible_este_kp
         interes_acum_kps += int_kps_generado_mes
         
-        # C. Relacionada
         int_rel_mes = 0
         total_interes_rel_exigible_hoy = 0
         for rel in rel_activos:
@@ -311,16 +285,11 @@ def calcular_flujo(data):
                 total_interes_rel_exigible_hoy += interes_exigible_este_rel
         interes_acum_relacionada += int_rel_mes
 
-        # 2. GENERACIÓN DE DEUDA BANCARIA (GIROS - SEGUNDO PASO)
-        # === LÓGICA DE DISTRIBUCIÓN COSTO CONSTRUCCIÓN ===
+        # 2. GIROS CONSTRUCCIÓN (Al final)
         egreso_equity_const = 0
-        
         if m >= inicio_obra and m <= fin_obra:
             if m == inicio_obra:
-                if duracion == 1:
-                     costo_mes_total = v_cont
-                else:
-                     costo_mes_total = v_cont * pct_avance_inicial
+                costo_mes_total = v_cont if duracion == 1 else v_cont * pct_avance_inicial
             else:
                 pct_restante = 1.0 - pct_avance_inicial
                 remanente = v_cont * pct_restante
@@ -329,8 +298,6 @@ def calcular_flujo(data):
             
             giro_banco = costo_mes_total * pct_fin_const
             egreso_equity_const = costo_mes_total - giro_banco 
-            
-            # EL GIRO SE SUMA AL FINAL (No genera interés este mes)
             saldo_const_uf += giro_banco * pct_uf
             saldo_const_clp_nominal += (giro_banco * pct_clp) * factor_uf 
         
@@ -342,19 +309,15 @@ def calcular_flujo(data):
         flujo_operativo = ingreso_uf + ingreso_deuda_este_mes - gasto_operativo_mes
         dinero_para_deuda = max(0.0, flujo_operativo)
         
-        # --- LÓGICA DE PAGO OBLIGATORIO DE INTERESES (EQUITY) ---
         if pagar_int_const:
             if dinero_para_deuda < int_banco_mes_en_uf:
                 deficit = int_banco_mes_en_uf - dinero_para_deuda
                 dinero_para_deuda += deficit 
                 egreso_equity_const += deficit 
         
-        # 4. WATERFALL DE PAGOS (CON LOGICA DE CIERRE FORZADO)
-        
-        # --- CHECK DE CIERRE: ¿ES EL ÚLTIMO MES DE VENTAS? ---
+        # 4. PAGOS
         es_mes_cierre = (m == ultimo_mes_venta)
         
-        # --- A. BANCO ---
         real_const_uf = saldo_const_uf + (saldo_const_clp_nominal / factor_uf)
         real_terr_uf = saldo_terr_uf + (saldo_terr_clp_nominal / factor_uf)
         deuda_banco_total = real_const_uf + real_terr_uf
@@ -364,7 +327,6 @@ def calcular_flujo(data):
         pago_banco_capital = 0
 
         if deuda_banco_total > 0:
-            # SI ES MES DE CIERRE, PAGAMOS TODO AUNQUE NO HAYA CAJA (EQUITY)
             if es_mes_cierre:
                 monto_a_pagar_banco = deuda_banco_total
             else:
@@ -372,7 +334,6 @@ def calcular_flujo(data):
             
             if monto_a_pagar_banco > 0:
                 pago_banco_interes = min(monto_a_pagar_banco, int_banco_mes_en_uf)
-                
                 if pagar_int_const and pago_banco_interes < int_banco_mes_en_uf and monto_a_pagar_banco >= int_banco_mes_en_uf:
                     pago_banco_interes = int_banco_mes_en_uf
 
@@ -392,10 +353,8 @@ def calcular_flujo(data):
                 else:
                     p_const = min(real_const_uf, monto_a_pagar_banco)
                 
-                # Descontar Saldos
                 if p_terr > 0 and real_terr_uf > 0:
                     prop = p_terr / real_terr_uf
-                    # Ajuste fino para evitar decimales residuales en cierre
                     if es_mes_cierre and p_terr >= real_terr_uf - 0.1: 
                          saldo_terr_uf = 0
                          saldo_terr_clp_nominal = 0
@@ -413,36 +372,31 @@ def calcular_flujo(data):
                         saldo_const_clp_nominal -= (saldo_const_clp_nominal * prop)
                 
                 pago_banco_total = monto_a_pagar_banco
-                dinero_para_deuda -= pago_banco_total # Puede quedar negativo si es cierre forzado
+                dinero_para_deuda -= pago_banco_total
 
-        # --- B. KPs ---
         pago_kps_total = 0
         pago_kps_interes = 0
         saldo_total_kps_contable = sum(k['saldo'] for k in kps_activos)
         
         if saldo_total_kps_contable > 0:
             if es_mes_cierre:
-                # Pagamos todo
                 monto_total_kp_pagar = saldo_total_kps_contable
                 pago_kps_interes = 0 
                 pago_kps_total = monto_total_kp_pagar
                 for kp in kps_activos: kp["saldo"] = 0
                 dinero_para_deuda -= pago_kps_total
-            
             elif dinero_para_deuda > 0:
                 monto_interes_kp_pagar = min(dinero_para_deuda, total_interes_kp_exigible_hoy)
                 for kp in kps_activos:
                     exigible_kp = 0
                     if kp["frecuencia"] == "Mensual": exigible_kp = (kp["saldo"] * kp["tasa_mensual"])
                     elif kp["frecuencia"] == "Trimestral" and m % 3 == 0: exigible_kp = kp["acumulado_trimestre"]
-                    
                     if total_interes_kp_exigible_hoy > 0:
                         peso_int = exigible_kp / total_interes_kp_exigible_hoy
                         pago_i = monto_interes_kp_pagar * peso_int
                         kp["saldo"] -= pago_i
                 pago_kps_interes = monto_interes_kp_pagar
                 dinero_para_deuda -= pago_kps_interes
-                
                 if dinero_para_deuda > 0:
                     monto_capital_kp = min(dinero_para_deuda, sum(k['saldo'] for k in kps_activos))
                     pago_kps_total = pago_kps_interes + monto_capital_kp
@@ -456,7 +410,6 @@ def calcular_flujo(data):
                 else:
                     pago_kps_total = pago_kps_interes
 
-        # --- C. Relacionada ---
         pago_rel_total = 0
         pago_rel_interes = 0
         saldo_total_rel_contable = sum(r['saldo'] for r in rel_activos)
@@ -467,21 +420,18 @@ def calcular_flujo(data):
                 pago_rel_total = monto_total_rel_pagar
                 for rel in rel_activos: rel["saldo"] = 0
                 dinero_para_deuda -= pago_rel_total
-            
             elif dinero_para_deuda > 0:
                 monto_interes_rel_pagar = min(dinero_para_deuda, total_interes_rel_exigible_hoy)
                 for rel in rel_activos:
                     exigible_rel = 0
                     if rel["frecuencia"] == "Mensual": exigible_rel = (rel["saldo"] * rel["tasa_mensual"])
                     elif rel["frecuencia"] == "Trimestral" and m % 3 == 0: exigible_rel = rel["acumulado_trimestre"]
-                    
                     if total_interes_rel_exigible_hoy > 0:
                         peso_int = exigible_rel / total_interes_rel_exigible_hoy
                         pago_i = monto_interes_rel_pagar * peso_int
                         rel["saldo"] -= pago_i
                 pago_rel_interes = monto_interes_rel_pagar
                 dinero_para_deuda -= pago_rel_interes
-                
                 if dinero_para_deuda > 0:
                     monto_capital_rel = min(dinero_para_deuda, sum(r['saldo'] for r in rel_activos))
                     pago_rel_total = pago_rel_interes + monto_capital_rel
@@ -495,10 +445,8 @@ def calcular_flujo(data):
                 else:
                     pago_rel_total = pago_rel_interes
 
-        # --- RESULTADOS ---
         total_pagado_intereses = pago_banco_interes + pago_kps_interes + pago_rel_interes
         total_pagado_capital = (pago_banco_total + pago_kps_total + pago_rel_total) - total_pagado_intereses
-        
         flujo_neto_mes = dinero_para_deuda - egreso_equity_const 
         if flujo_operativo < 0:
             flujo_neto_mes = flujo_operativo - egreso_equity_const
@@ -522,15 +470,12 @@ def calcular_flujo(data):
             "Ingresos Deuda": ingreso_deuda_este_mes, 
             "Otros Costos (Op)": gasto_operativo_mes,
             "Inversión (Equity)": egreso_equity_const,
-            
             "Int. Banco": pago_banco_interes,
             "Int. KPs": pago_kps_interes,
-            "Int. Relac.": pago_rel_interes, # AQUI ESTABA EL ERROR CORREGIDO (CON PUNTO)
-            
+            "Int. Relac.": pago_rel_interes,
             "Devengado Banco": int_banco_mes_en_uf,
             "Devengado KPs": int_kps_generado_mes,
             "Devengado Relac.": int_rel_mes,
-            
             "Pago Intereses Total": total_pagado_intereses,
             "Pago Capital": total_pagado_capital,
             "Flujo Neto": flujo_neto_mes,
@@ -538,25 +483,15 @@ def calcular_flujo(data):
         })
     
     df = pd.DataFrame(flujo)
-    
     costo_fin_total = interes_acum_banco_total + interes_acum_kps + interes_acum_relacionada
     costo_proyecto_total = v_terr + v_cont + v_otros_inicial + total_otros_costos_operativos + costo_fin_total
     utilidad = data["valor_venta_total"] - costo_proyecto_total
-    
     roi = (utilidad / costo_proyecto_total) * 100 if costo_proyecto_total > 0 else 0
 
     return {
-        "df": df,
-        "utilidad": utilidad,
-        "costo_financiero_total": costo_fin_total,
-        "detalles_fin": {
-            "banco": interes_acum_banco_total,
-            "kps": interes_acum_kps,
-            "relacionada": interes_acum_relacionada
-        },
-        "roi": roi,
-        "peak_deuda": df["Deuda Total"].max(),
-        "break_even": mes_break_even
+        "df": df, "utilidad": utilidad, "costo_financiero_total": costo_fin_total,
+        "detalles_fin": { "banco": interes_acum_banco_total, "kps": interes_acum_kps, "relacionada": interes_acum_relacionada },
+        "roi": roi, "peak_deuda": df["Deuda Total"].max(), "break_even": mes_break_even
     }
 
 # --- 3. UI ---
@@ -569,19 +504,15 @@ if 'calc_results' not in st.session_state:
 
 with col_inputs:
     st.markdown("### Configuración")
-    
     col_btn1, col_btn2 = st.columns(2)
-    
     if col_btn1.button("🔽 Expandir Todo", key="btn_expand", use_container_width=True):
         st.session_state.menu_expanded = True
         st.session_state.exp_reset_token += 1 
         st.rerun()
-        
     if col_btn2.button("🔼 Colapsar Todo", key="btn_collapse", use_container_width=True):
         st.session_state.menu_expanded = False
         st.session_state.exp_reset_token += 1 
         st.rerun()
-    
     if st.button("🚀 Procesar y Actualizar", type="primary", use_container_width=True):
         st.session_state.calc_results = {name: calcular_flujo(st.session_state.data_scenarios[name]) for name in SCENARIOS}
         st.rerun()
@@ -619,14 +550,11 @@ with col_inputs:
 
             with st.expander(f"🏦 Deuda Bancaria{lbl_suffix}", expanded=is_expanded):
                 data["pct_deuda_pesos"] = st.slider("% Deuda CLP", 0, 100, data["pct_deuda_pesos"], key=f"{scen_key}_mix")
-                
                 c1, c2, c3 = st.columns(3)
                 data["tasa_anual_uf"] = c1.number_input("Tasa UF", value=data["tasa_anual_uf"], step=0.1, key=f"{scen_key}_tuf")
                 data["tasa_anual_clp"] = c2.number_input("Tasa CLP", value=data["tasa_anual_clp"], step=0.1, key=f"{scen_key}_tclp")
                 data["inflacion_anual"] = c3.number_input("Infl. %", value=data["inflacion_anual"], step=0.1, key=f"{scen_key}_inf")
-                
                 data["pagar_intereses_construccion"] = st.checkbox("Pagar intereses durante construcción (Equity)", value=data.get("pagar_intereses_construccion", False), key=f"{scen_key}_pay_int")
-                
                 st.markdown("**Pago Terreno**")
                 rango_val = data.get("rango_pago_terreno", [1, 60])
                 data["rango_pago_terreno"] = st.slider("Ventana Pago", 1, 60, (rango_val[0], rango_val[1]), key=f"{scen_key}_rng")
@@ -637,7 +565,6 @@ with col_inputs:
                 if st.button("➕ Agregar Deuda Relacionada", key=f"add_rel_{scen_key}"):
                     data["lista_relacionadas"].append({"nombre": f"Rel {len(data.get('lista_relacionadas', []))+1}", "monto": 5000.0, "tasa_anual": 8.0, "frecuencia_pago": "Al Final", "mes_inicio": 1})
                     st.rerun()
-
                 idx_rel_remove = []
                 for i, rel in enumerate(data.get("lista_relacionadas", [])):
                     st.markdown(f"**Relacionada #{i+1}**")
@@ -658,7 +585,6 @@ with col_inputs:
                 if st.button("➕ Agregar KP", key=f"add_kp_{scen_key}"):
                     data["lista_kps"].append({"nombre": f"KP {len(data['lista_kps'])+1}", "monto": 1000.0, "tasa_anual": 10.0, "plazo": 24, "frecuencia_pago": "Mensual", "mes_inicio": 1})
                     st.rerun()
-
                 idx_kp_remove = []
                 for i, kp in enumerate(data["lista_kps"]):
                     st.markdown(f"**KP #{i+1}**")
@@ -687,6 +613,13 @@ with col_inputs:
                     last_mes = lista_ventas[-1]["mes"] if lista_ventas else 23
                     data["plan_ventas"].append({"mes": last_mes + 1, "pct": max(0.0, 100.0 - total_pct)})
                     st.rerun()
+                
+                # --- NUEVOS ENCABEZADOS (Labels) ---
+                st.markdown("---")
+                ch1, ch2, ch3 = st.columns([1.5, 1.5, 0.5])
+                ch1.markdown("**Mes Recupero:**")
+                ch2.markdown("**Porcentaje de recupero:**")
+                
                 idx_v_rem = []
                 for i, r in enumerate(lista_ventas):
                     c1, c2, c3 = st.columns([1.5, 1.5, 0.5])
@@ -741,7 +674,7 @@ with col_dash:
             "Otros Costos (Op)": df_display["Otros Costos (Op)"].sum(),
             "Int. Banco": df_display["Int. Banco"].sum(),
             "Int. KPs": df_display["Int. KPs"].sum(),
-            "Int. Relac.": df_display["Int. Relac."].sum(), # CON PUNTO
+            "Int. Relac.": df_display["Int. Relac."].sum(),
             "Pago Capital": df_display["Pago Capital"].sum(),
             "Flujo Neto": df_display["Flujo Neto"].sum(),
             "Flujo Acumulado": df_display["Flujo Neto"].sum(), 
@@ -758,7 +691,7 @@ with col_dash:
             "Otros Costos (Op)": st.column_config.TextColumn("Otros Costos"),
             "Int. Banco": st.column_config.TextColumn("Int. Banco (Pagado)"),
             "Int. KPs": st.column_config.TextColumn("Int. KPs (Pagado)"),
-            "Int. Relac.": st.column_config.TextColumn("Int. Relac. (Pagado)"), # CON PUNTO
+            "Int. Relac.": st.column_config.TextColumn("Int. Relac. (Pagado)"),
             "Pago Capital": st.column_config.TextColumn("Capital"),
             "Flujo Neto": st.column_config.TextColumn("Flujo Neto"),
             "Flujo Acumulado": st.column_config.TextColumn("Acumulado"),
@@ -775,7 +708,6 @@ with col_dash:
     mes_construccion = mes_inicio_obra + duracion_obra - 1
     mes_recepcion = int(params_real["mes_recepcion"])
     
-    # 1. Recuperamos el Interés Histórico
     int_previos = st.session_state.data_scenarios["Real"].get("intereses_previos_uf", 0.0)
     
     df_real = res["df"]
@@ -792,21 +724,15 @@ with col_dash:
     ]
     
     milestone_data = []
-    # 2. El total base para los porcentajes incluye lo histórico
     total_costo_global = res["costo_financiero_total"] + int_previos
     
     for ms in milestones:
         df_cut = df_real[df_real["Mes"] <= ms["mes"]]
-        
-        # 3. Sumamos el histórico al acumulado del banco
         acum_banco = df_cut["Devengado Banco"].sum() + int_previos
         acum_kps = df_cut["Devengado KPs"].sum()
         acum_relac = df_cut["Devengado Relac."].sum() 
-        
         total_acum = acum_banco + acum_kps + acum_relac
-        
         pct_avance = (total_acum / total_costo_global * 100) if total_costo_global > 0 else 0
-        
         milestone_data.append({
             "Hito": f"{ms['nombre']} (Mes {ms['mes']})",
             "Acum. Banco": fmt_nums(acum_banco),
